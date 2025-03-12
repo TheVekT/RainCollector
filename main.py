@@ -37,17 +37,30 @@ class AccountWindow:
 
     async def find_template(self, template):
         """
-        Выполняет поиск шаблона в текущем окне.
+        Выполняет поиск шаблона в текущем окне с учетом изменения масштаба.
+        Перебирает масштабы от 50% до 150% от исходного размера.
         Возвращает координаты (центра) найденного шаблона в глобальных координатах экрана,
-        если найдено, иначе None.
+        если совпадение выше порога, иначе None.
         """
         frame = await self.capture_screenshot()
-        res = cv2.matchTemplate(frame, template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-        if max_val >= self.match_threshold:
-            h, w = template.shape
-            center_x = self.window.left + max_loc[0] + w // 2
-            center_y = self.window.top + max_loc[1] + h // 2
+        best_val = -1
+        best_loc = None
+        best_template = None
+        # Перебор масштабов от 0.5 до 1.5 с шагом 0.1
+        for scale in np.linspace(0.5, 1.5, 11):
+            # Изменяем размер шаблона
+            scaled_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            res = cv2.matchTemplate(frame, scaled_template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+            if max_val > best_val:
+                best_val = max_val
+                best_loc = max_loc
+                best_template = scaled_template
+
+        if best_val >= self.match_threshold and best_loc is not None and best_template is not None:
+            h, w = best_template.shape
+            center_x = self.window.left + best_loc[0] + w // 2
+            center_y = self.window.top + best_loc[1] + h // 2
             return (center_x, center_y)
         return None
 
