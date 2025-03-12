@@ -79,19 +79,19 @@ class AccountWindow:
         pyautogui.moveTo(coord[0], coord[1], duration=0.1)
         pyautogui.click()
         # Небольшая задержка после клика
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
 
     async def refresh_page(self):
         """
         Эмулирует нажатие клавиши F5 для обновления страницы.
         """
         pyautogui.press('f5')
-        await asyncio.sleep(1)  # Ждем обновления страницы
+        await asyncio.sleep(1.5)  # Ждем обновления страницы
 
 
 class RainCollector:
     def __init__(self, windows):
-        self.windows = windows
+        self.windows: list[AccountWindow] = windows
 
     @classmethod
     async def create(cls):
@@ -124,8 +124,8 @@ class RainCollector:
                     coord = await account.wait_for_rain()
                     await plogging.info(f"Рейн обнаружен в окне {account.name} по координатам {coord}. Выполняем клик.")
                     await account.click_at(coord)
-                    # Ждем 4 секунды для обновления статуса
-                    await asyncio.sleep(4)
+                    # Ждем N секунды для обновления статуса
+                    await asyncio.sleep(7)
                     if await account.check_rain_joined():
                         await plogging.info(f"В окне {account.name} успешно присоединились к рейну.")
                     else:
@@ -136,7 +136,7 @@ class RainCollector:
                         coord = await account.find_template(account.rain_template)
                         if coord:
                             await account.click_at(coord)
-                            await asyncio.sleep(5)
+                            await asyncio.sleep(7)
                             if await account.check_rain_joined():
                                 await plogging.info(f"В окне {account.name} успешно присоединились к рейну после обновления.")
                             else:
