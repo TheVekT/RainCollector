@@ -39,6 +39,7 @@ class AccountWindow:
         """
         Выполняет поиск шаблона в текущем окне с учетом изменения масштаба.
         Перебирает масштабы от 50% до 150% от исходного размера.
+        Выводит в debug-лог значение совпадения для каждого масштаба.
         Возвращает координаты (центра) найденного шаблона в глобальных координатах экрана,
         если совпадение выше порога, иначе None.
         """
@@ -46,17 +47,16 @@ class AccountWindow:
         best_val = -1
         best_loc = None
         best_template = None
-        # Перебор масштабов от 0.5 до 1.5 с шагом 0.1
         for scale in np.linspace(0.5, 1.5, 11):
             # Изменяем размер шаблона
             scaled_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
             res = cv2.matchTemplate(frame, scaled_template, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
             if max_val > best_val:
                 best_val = max_val
                 best_loc = max_loc
                 best_template = scaled_template
-
+        await plogging.debug(f"Best match value: {best_val:.3f}")
         if best_val >= self.match_threshold and best_loc is not None and best_template is not None:
             h, w = best_template.shape
             center_x = self.window.left + best_loc[0] + w // 2
@@ -73,7 +73,7 @@ class AccountWindow:
             coord = await self.find_template(self.rain_template)
             if coord:
                 return coord
-            # Оптимизация – проверяем каждые 1 секунду
+            await plogging.debug("Шаблон не найден, повторная проверка через 1 сек.")
             await asyncio.sleep(1)
 
     async def check_rain_joined(self):
@@ -88,10 +88,8 @@ class AccountWindow:
         """
         Эмулирует физический клик по указанным координатам с плавным перемещением мыши.
         """
-        # Перемещаем мышь с короткой анимацией (0.1 сек)
         pyautogui.moveTo(coord[0], coord[1], duration=0.1)
         pyautogui.click()
-        # Небольшая задержка после клика
         await asyncio.sleep(0.2)
 
     async def refresh_page(self):
@@ -126,6 +124,7 @@ class RainCollector:
          - Ожидает появления события (рейна)
          - Эмулирует клик по кнопке и проверяет успешность
          - При неудаче – обновляет страницу и повторяет попытку
+         В режиме debug выводятся результаты каждого этапа.
         """
         while True:
             for account in self.windows:
@@ -133,11 +132,9 @@ class RainCollector:
                 await plogging.info(f"Проверяем окно: {account.name}")
                 try:
                     await plogging.info("Ожидание события рейна...")
-                    # Ожидаем появления кнопки "Join rain"
                     coord = await account.wait_for_rain()
                     await plogging.info(f"Рейн обнаружен в окне {account.name} по координатам {coord}. Выполняем клик.")
                     await account.click_at(coord)
-                    # Ждем N секунды для обновления статуса
                     await asyncio.sleep(7)
                     if await account.check_rain_joined():
                         await plogging.info(f"В окне {account.name} успешно присоединились к рейну.")
@@ -145,7 +142,6 @@ class RainCollector:
                         await plogging.warn(f"В окне {account.name} не удалось присоединиться к рейну. Обновляем страницу и повторяем попытку.")
                         await account.refresh_page()
                         await asyncio.sleep(1)
-                        # Повторный поиск кнопки после обновления
                         coord = await account.find_template(account.rain_template)
                         if coord:
                             await account.click_at(coord)
@@ -158,13 +154,13 @@ class RainCollector:
                             await plogging.error(f"Кнопка присоединения не найдена в окне {account.name} после обновления. Пропускаем окно.")
                 except Exception as e:
                     await plogging.error(f"Ошибка в окне {account.name}: {e}")
-            # После прохода по всем окнам делаем небольшую паузу перед следующим циклом
             await asyncio.sleep(1)
 
 
-if __name__ == "__main__":
-    async def main():
-        collector = await RainCollector.create()
-        await collector.run()
+async def main():
+    collector = await RainCollector.create()
+    await collector.run()
 
+
+if __name__ == "__main__":
     asyncio.run(main())
