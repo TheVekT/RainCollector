@@ -56,7 +56,6 @@ class AccountWindow:
             scaled_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
             res = cv2.matchTemplate(frame, scaled_template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(res)
-            await plogging.debug(f"Scale {scale:.2f}: max_val = {max_val:.3f}")
             if max_val > best_val:
                 best_val = max_val
                 best_loc = max_loc
