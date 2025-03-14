@@ -1,4 +1,5 @@
 import asyncio
+import time
 import pyautogui
 import cv2
 import numpy as np
@@ -18,6 +19,10 @@ class AccountWindow:
         # Загружаем шаблоны в оттенках серого
         self.rain_template = cv2.imread("resources/join_button.jpg", cv2.IMREAD_GRAYSCALE)
         self.rain_joined_template = cv2.imread("resources/joined_button.jpg", cv2.IMREAD_GRAYSCALE)
+        # Шаблон области Cloudflare, который появляется при загрузке/подтверждении
+        self.cloudflare_template = cv2.imread("resources/loading.jpg", cv2.IMREAD_GRAYSCALE)
+        # Шаблон кнопки подтверждения (например, "Я не робот")
+        self.confirm_button_template = cv2.imread("resources/confirm_pls.jpg", cv2.IMREAD_GRAYSCALE)
         self.match_threshold = 0.8  # Порог сопоставления шаблона
 
     async def focus(self):
@@ -48,10 +53,10 @@ class AccountWindow:
         best_loc = None
         best_template = None
         for scale in np.linspace(0.5, 1.5, 11):
-            # Изменяем размер шаблона
             scaled_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
             res = cv2.matchTemplate(frame, scaled_template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            await plogging.debug(f"Scale {scale:.2f}: max_val = {max_val:.3f}")
             if max_val > best_val:
                 best_val = max_val
                 best_loc = max_loc
@@ -73,7 +78,7 @@ class AccountWindow:
             coord = await self.find_template(self.rain_template)
             if coord:
                 return coord
-            await plogging.debug("Шаблон не найден, повторная проверка через 1 сек.")
+            await plogging.debug("Кнопка Join rain не найдена, повторная проверка через 1 сек.")
             await asyncio.sleep(1)
 
     async def check_rain_joined(self):
@@ -86,9 +91,9 @@ class AccountWindow:
 
     async def click_at(self, coord):
         """
-        Эмулирует физический клик по указанным координатам с плавным перемещением мыши.
+        Эмулирует физический клик по указанным координатам с «человеческим» наведением.
         """
-        pyautogui.moveTo(coord[0], coord[1], duration=0.1)
+        pyautogui.moveTo(coord[0], coord[1], duration=0.3, tween=pyautogui.easeInOutQuad)
         pyautogui.click()
         await asyncio.sleep(0.2)
 
@@ -98,6 +103,32 @@ class AccountWindow:
         """
         pyautogui.press('f5')
         await asyncio.sleep(1.5)  # Ждем обновления страницы
+
+    async def wait_for_rain_completion(self, timeout=10):
+        """
+        Ожидает завершения загрузки/подтверждения рейна, т.е. появления статуса "RAIN JOINED".
+        При этом, если обнаруживается область Cloudflare, ищется и нажимается кнопка подтверждения.
+        Возвращает True, если статус изменился на "RAIN JOINED", иначе False по истечении timeout.
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # Если статус изменился, возвращаем успех
+            if await self.check_rain_joined():
+                return True
+
+            # Если обнаружена область Cloudflare
+            cloudflare = await self.find_template(self.cloudflare_template)
+            if cloudflare:
+                await plogging.info("Обнаружена область Cloudflare, требуется подтверждение.")
+                # Пытаемся найти кнопку подтверждения
+                confirm = await self.find_template(self.confirm_button_template)
+                if confirm:
+                    await plogging.info("Найдена кнопка подтверждения. Выполняем клик.")
+                    await self.click_at(confirm)
+                else:
+                    await plogging.debug("Кнопка подтверждения не обнаружена.")
+            await asyncio.sleep(0.5)
+        return False
 
 
 class RainCollector:
@@ -131,27 +162,27 @@ class RainCollector:
                 await account.focus()
                 await plogging.info(f"Проверяем окно: {account.name}")
                 try:
-                    await plogging.info("Ожидание события рейна...")
+                    await plogging.info("Ожидание появления кнопки Join rain...")
                     coord = await account.wait_for_rain()
-                    await plogging.info(f"Рейн обнаружен в окне {account.name} по координатам {coord}. Выполняем клик.")
+                    await plogging.info(f"Кнопка Join rain обнаружена в окне {account.name} по координатам {coord}. Выполняем клик.")
                     await account.click_at(coord)
-                    await asyncio.sleep(7)
-                    if await account.check_rain_joined():
+                    await plogging.info("Ожидание завершения загрузки рейна...")
+                    if await account.wait_for_rain_completion(timeout=10):
                         await plogging.info(f"В окне {account.name} успешно присоединились к рейну.")
                     else:
-                        await plogging.warn(f"В окне {account.name} не удалось присоединиться к рейну. Обновляем страницу и повторяем попытку.")
+                        await plogging.warn(f"Не удалось присоединиться к рейну в окне {account.name}. Обновляем страницу и повторяем попытку.")
                         await account.refresh_page()
                         await asyncio.sleep(1)
+                        # Повторный поиск кнопки Join rain после обновления
                         coord = await account.find_template(account.rain_template)
                         if coord:
                             await account.click_at(coord)
-                            await asyncio.sleep(7)
-                            if await account.check_rain_joined():
+                            if await account.wait_for_rain_completion(timeout=10):
                                 await plogging.info(f"В окне {account.name} успешно присоединились к рейну после обновления.")
                             else:
                                 await plogging.error(f"Присоединение к рейну в окне {account.name} не удалось после обновления. Пропускаем окно.")
                         else:
-                            await plogging.error(f"Кнопка присоединения не найдена в окне {account.name} после обновления. Пропускаем окно.")
+                            await plogging.error(f"Кнопка Join rain не найдена в окне {account.name} после обновления. Пропускаем окно.")
                 except Exception as e:
                     await plogging.error(f"Ошибка в окне {account.name}: {e}")
             await asyncio.sleep(1)
