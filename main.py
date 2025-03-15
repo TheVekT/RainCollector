@@ -48,7 +48,7 @@ class AccountWindow:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         return frame
 
-    async def detect_object_yolo(self, target_label: str, conf_threshold: float = 0.8):
+    async def detect_object_yolo(self, target_label: str | tuple, conf_threshold: float = 0.8):
         """
         Выполняет детектирование с помощью YOLOv8.
         Захватываем цветной скриншот, переводим его в формат RGB и запускаем инференс.
@@ -67,10 +67,10 @@ class AccountWindow:
             if conf >= conf_threshold:
                 # Получаем метку класса, предполагается, что модель хранит имена классов в model.names
                 label = self.yolo_model.model.names[int(cls)]
-                if label == target_label:
+                if label == target_label or label in target_label:
                     center_x = self.window.left + int((x1 + x2) / 2)
                     center_y = self.window.top + int((y1 + y2) / 2)
-                    return (center_x, center_y)
+                    return (center_x, center_y, label) if isinstance(target_label, tuple) else (center_x, center_y)
         return None
 
     async def wait_for_rain(self):
@@ -108,35 +108,44 @@ class AccountWindow:
         pyautogui.press('f5')
         await asyncio.sleep(1.5)
 
-    async def wait_for_rain_completion(self, timeout=10):
+    async def wait_for_rain_completion(self, timeout=15):
         """
         Ожидает завершения загрузки/подтверждения рейна.
-        Если обнаружена область Cloudflare (метка "cloudflare_loading"),
-        то проверяем наличие кнопки подтверждения (метка "confirm_cloudflare") и кликаем по ней.
-        Возвращает True, если статус изменился на "rain_joined", иначе False.
+        Логика:
+          - Сначала проверяем, появился ли статус "rain_joined".
+          - Если нет, ищем индикаторы загрузки: "cloudflare_loading" или "confirm_cloudflare".
+          - Если найден "confirm_cloudflare", выполняем клик по нему.
+          - Ждем, пока индикаторы загрузки исчезнут, после чего проверяем, изменился ли статус на "rain_joined".
         """
         start_time = time.time()
+        loading_detected = False
         while time.time() - start_time < timeout:
-            # Если статус изменился, возвращаем успех
+            # Если статус изменился на "rain_joined", считаем рейн успешно принят.
             if await self.check_rain_joined():
                 return True
 
-            # Проверяем наличие области Cloudflare (загрузка)
-            loading = await self.detect_object_yolo("cloudflare_loading", conf_threshold=0.8)
-            if loading:
-                await plogging.info("Область Cloudflare обнаружена (загрузка).")
-                # Если обнаружена кнопка подтверждения, кликаем по ней
-                confirm = await self.detect_object_yolo("confirm_cloudflare", conf_threshold=0.8)
-                if confirm:
-                    await plogging.info("Найдена кнопка подтверждения. Выполняем клик.")
+            # Проверяем наличие индикаторов загрузки
+            cloudflare = await self.detect_object_yolo(("cloudflare_loading", "confirm_cloudflare"), conf_threshold=0.8)
+
+            if cloudflare:
+                loading_detected = True
+                if cloudflare[2] == "confirm_cloudflare":
+                    confirm = (cloudflare[0], cloudflare[1])
+                    await plogging.info("Найдена кнопка подтверждения (confirm_cloudflare). Выполняем клик.")
                     await self.click_at(confirm)
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(1)  # Ждём после клика
                 else:
-                    await plogging.debug("Кнопка подтверждения не обнаружена, обычная загрузка.")
+                    await plogging.info("Загрузка активна (cloudflare_loading обнаружен).")
             else:
-                await plogging.debug("Область Cloudflare не обнаружена.")
+                if loading_detected:
+                    # Если ранее была загрузка, а теперь индикаторы исчезли, проверяем статус
+                    if await self.check_rain_joined():
+                        return True
+                    else:
+                        await plogging.info("Загрузка завершилась, но статус еще не обновлен. Продолжаем ожидание.")
             await asyncio.sleep(0.5)
         return False
+
 
     async def find_template(self, template):
         """
