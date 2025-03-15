@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pygetwindow as gw
 from plogging import Plogging
+from ultralytics import YOLO  # Импорт модели YOLOv8
 
 plogging = Plogging()
 plogging.set_websocket_settings(False, False, False, False)
@@ -16,37 +17,130 @@ class AccountWindow:
     def __init__(self, window):
         self.window = window  # Объект окна из pygetwindow
         self.name = window.title
-        # Загружаем шаблоны в оттенках серого
+        self.match_threshold = 0.8  # Порог сопоставления (для шаблонов, если нужны)
+
+        # Инициализируем YOLOv8 модель.
+        # Укажите корректный путь к вашему файлу модели.
+        self.yolo_model = YOLO("best.pt")
+
+        # Если шаблоны нужны для каких-то резервных случаев, их можно оставить.
         self.rain_template = cv2.imread("resources/join_button.jpg", cv2.IMREAD_GRAYSCALE)
         self.rain_joined_template = cv2.imread("resources/joined_button.jpg", cv2.IMREAD_GRAYSCALE)
-        # Шаблон области Cloudflare (загрузка)
         self.cloudflare_template = cv2.imread("resources/loading.jpg", cv2.IMREAD_GRAYSCALE)
-        # Шаблон кнопки подтверждения (например, "Я не робот")
         self.confirm_button_template = cv2.imread("resources/confirm_pls.jpg", cv2.IMREAD_GRAYSCALE)
-        self.match_threshold = 0.8  # Порог сопоставления шаблона
 
     async def focus(self):
         if self.window.isMinimized:
             self.window.restore()  # Восстанавливаем окно, если оно свернуто
-            await asyncio.sleep(0.5)  # Ждем, чтобы окно восстановилось
+            await asyncio.sleep(0.5)
         self.window.activate()
         await asyncio.sleep(0.5)
 
-    async def capture_screenshot(self):
-        """Делает скриншот области окна и переводит его в формат OpenCV (grayscale)."""
+    async def capture_screenshot(self, grayscale: bool = True):
+        """
+        Делает скриншот области окна и возвращает изображение.
+        Если grayscale=True, то конвертирует изображение в оттенки серого.
+        """
         bbox = (self.window.left, self.window.top, self.window.width, self.window.height)
         image = pyautogui.screenshot(region=bbox)
         frame = np.array(image)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        if grayscale:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         return frame
+
+    async def detect_object_yolo(self, target_label: str, conf_threshold: float = 0.8):
+        """
+        Выполняет детектирование с помощью YOLOv8.
+        Захватываем цветной скриншот, переводим его в формат RGB и запускаем инференс.
+        Если найден объект с нужной меткой и уверенностью выше порога, возвращаем
+        координаты центра объекта с учётом позиции окна.
+        """
+        # Получаем цветной скриншот для детектирования
+        frame = await self.capture_screenshot(grayscale=False)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.yolo_model(frame_rgb)
+
+        # Обрабатываем результаты инференса (предполагается, что результаты в results[0].boxes.data)
+        detections = results[0].boxes.data.cpu().numpy() if results and results[0].boxes.data is not None else np.array([])
+        for detection in detections:
+            x1, y1, x2, y2, conf, cls = detection
+            if conf >= conf_threshold:
+                # Получаем метку класса, предполагается, что модель хранит имена классов в model.names
+                label = self.yolo_model.model.names[int(cls)]
+                if label == target_label:
+                    center_x = self.window.left + int((x1 + x2) / 2)
+                    center_y = self.window.top + int((y1 + y2) / 2)
+                    return (center_x, center_y)
+        return None
+
+    async def wait_for_rain(self):
+        """
+        Ожидает появления объекта с меткой "join_rain".
+        Возвращает координаты найденного объекта.
+        """
+        while True:
+            coord = await self.detect_object_yolo("join_rain", conf_threshold=0.8)
+            if coord:
+                return coord
+            await plogging.debug("Объект 'join_rain' не обнаружен, повторная проверка через 1 сек.")
+            await asyncio.sleep(1)
+
+    async def check_rain_joined(self):
+        """
+        Проверяет, изменился ли статус на "rain_joined" с помощью YOLO.
+        Возвращает True, если объект найден, иначе False.
+        """
+        coord = await self.detect_object_yolo("rain_joined", conf_threshold=0.8)
+        return coord is not None
+
+    async def click_at(self, coord):
+        """
+        Эмулирует физический клик по указанным координатам с «человеческим» наведением.
+        """
+        pyautogui.moveTo(coord[0], coord[1], duration=0.3, tween=pyautogui.easeInOutQuad)
+        pyautogui.click()
+        await asyncio.sleep(0.2)
+
+    async def refresh_page(self):
+        """
+        Эмулирует нажатие клавиши F5 для обновления страницы.
+        """
+        pyautogui.press('f5')
+        await asyncio.sleep(1.5)
+
+    async def wait_for_rain_completion(self, timeout=10):
+        """
+        Ожидает завершения загрузки/подтверждения рейна.
+        Если обнаружена область Cloudflare (метка "cloudflare_loading"),
+        то проверяем наличие кнопки подтверждения (метка "confirm_cloudflare") и кликаем по ней.
+        Возвращает True, если статус изменился на "rain_joined", иначе False.
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # Если статус изменился, возвращаем успех
+            if await self.check_rain_joined():
+                return True
+
+            # Проверяем наличие области Cloudflare (загрузка)
+            loading = await self.detect_object_yolo("cloudflare_loading", conf_threshold=0.8)
+            if loading:
+                await plogging.info("Область Cloudflare обнаружена (загрузка).")
+                # Если обнаружена кнопка подтверждения, кликаем по ней
+                confirm = await self.detect_object_yolo("confirm_cloudflare", conf_threshold=0.8)
+                if confirm:
+                    await plogging.info("Найдена кнопка подтверждения. Выполняем клик.")
+                    await self.click_at(confirm)
+                    await asyncio.sleep(1)
+                else:
+                    await plogging.debug("Кнопка подтверждения не обнаружена, обычная загрузка.")
+            else:
+                await plogging.debug("Область Cloudflare не обнаружена.")
+            await asyncio.sleep(0.5)
+        return False
 
     async def find_template(self, template):
         """
-        Выполняет поиск шаблона в текущем окне с учетом изменения масштаба.
-        Перебирает масштабы от 50% до 150% от исходного размера.
-        Выводит в debug-лог значение совпадения для каждого масштаба.
-        Возвращает координаты (центра) найденного шаблона в глобальных координатах экрана,
-        если совпадение выше порога, иначе None.
+        Резервный метод сопоставления шаблонов (если потребуется).
         """
         frame = await self.capture_screenshot()
         best_val = -1
@@ -69,73 +163,6 @@ class AccountWindow:
             return (center_x, center_y)
         return None
 
-    async def wait_for_rain(self):
-        """
-        Ожидает появления события (когда кнопка "Join rain" появляется в окне).
-        При обнаружении возвращает координаты кнопки.
-        """
-        while True:
-            coord = await self.find_template(self.rain_template)
-            if coord:
-                return coord
-            await plogging.debug("Кнопка Join rain не найдена, повторная проверка через 1 сек.")
-            await asyncio.sleep(1)
-
-    async def check_rain_joined(self):
-        """
-        Проверяет, изменился ли статус на "RAIN JOINED".
-        Возвращает True, если статус найден, иначе False.
-        """
-        coord = await self.find_template(self.rain_joined_template)
-        return coord is not None
-
-    async def click_at(self, coord):
-        """
-        Эмулирует физический клик по указанным координатам с «человеческим» наведением.
-        """
-        pyautogui.moveTo(coord[0], coord[1], duration=0.3, tween=pyautogui.easeInOutQuad)
-        pyautogui.click()
-        await asyncio.sleep(0.2)
-
-    async def refresh_page(self):
-        """
-        Эмулирует нажатие клавиши F5 для обновления страницы.
-        """
-        pyautogui.press('f5')
-        await asyncio.sleep(1.5)  # Ждем обновления страницы
-
-    async def wait_for_rain_completion(self, timeout=10):
-        """
-        Ожидает завершения загрузки/подтверждения рейна, т.е. появления статуса "RAIN JOINED".
-        Если обнаружена область Cloudflare (self.cloudflare_template), то:
-          - Если обнаружена кнопка подтверждения (self.confirm_button_template), кликаем по ней.
-          - Если кнопка подтверждения не обнаружена, считаем, что идёт стандартная загрузка (ничего нажимать не надо).
-        Возвращает True, если статус изменился на "RAIN JOINED", иначе False по истечении timeout.
-        """
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            # Если статус изменился, возвращаем успех
-            if await self.check_rain_joined():
-                return True
-
-            # Проверяем наличие области Cloudflare (загрузка)
-            loading = await self.find_template(self.cloudflare_template)
-            if loading:
-                await plogging.info("Область Cloudflare обнаружена (загрузка).")
-                # Если обнаружена кнопка подтверждения, значит требуется дополнительное действие
-                confirm = await self.find_template(self.confirm_button_template)
-                if confirm:
-                    await plogging.info("Найдена кнопка подтверждения. Выполняем клик.")
-                    await self.click_at(confirm)
-                    # Ждем немного после клика, чтобы подтверждение применилось
-                    await asyncio.sleep(1)
-                else:
-                    await plogging.debug("Кнопка подтверждения не обнаружена, обычная загрузка.")
-            else:
-                await plogging.debug("Область Cloudflare не обнаружена.")
-            await asyncio.sleep(0.5)
-        return False
-
 
 class RainCollector:
     def __init__(self, windows):
@@ -156,21 +183,20 @@ class RainCollector:
 
     async def run(self):
         """
-        Основной бесконечный цикл, который последовательно обрабатывает каждое окно:
-         - Фокусирует окно
-         - Ожидает появления события (рейна)
-         - Эмулирует клик по кнопке и проверяет успешность
-         - При неудаче – обновляет страницу и повторяет попытку
-         В режиме debug выводятся результаты каждого этапа.
+        Основной цикл: для каждого окна
+          - Фокусируем окно
+          - Ожидаем появления объекта "join_rain" (с помощью YOLO)
+          - Выполняем клик и проверяем успешное завершение
+          - При неудаче обновляем страницу и повторяем попытку
         """
         while True:
             for account in self.windows:
                 await account.focus()
                 await plogging.info(f"Проверяем окно: {account.name}")
                 try:
-                    await plogging.info("Ожидание появления кнопки Join rain...")
+                    await plogging.info("Ожидание появления объекта 'join_rain'...")
                     coord = await account.wait_for_rain()
-                    await plogging.info(f"Кнопка Join rain обнаружена в окне {account.name} по координатам {coord}. Выполняем клик.")
+                    await plogging.info(f"Объект 'join_rain' обнаружен в окне {account.name} по координатам {coord}. Выполняем клик.")
                     await account.click_at(coord)
                     await plogging.info("Ожидание завершения загрузки рейна...")
                     if await account.wait_for_rain_completion(timeout=10):
@@ -179,8 +205,7 @@ class RainCollector:
                         await plogging.warn(f"Не удалось присоединиться к рейну в окне {account.name}. Обновляем страницу и повторяем попытку.")
                         await account.refresh_page()
                         await asyncio.sleep(1)
-                        # Повторный поиск кнопки Join rain после обновления
-                        coord = await account.find_template(account.rain_template)
+                        coord = await account.detect_object_yolo("join_rain", conf_threshold=0.8)
                         if coord:
                             await account.click_at(coord)
                             if await account.wait_for_rain_completion(timeout=10):
@@ -188,7 +213,7 @@ class RainCollector:
                             else:
                                 await plogging.error(f"Присоединение к рейну в окне {account.name} не удалось после обновления. Пропускаем окно.")
                         else:
-                            await plogging.error(f"Кнопка Join rain не найдена в окне {account.name} после обновления. Пропускаем окно.")
+                            await plogging.error(f"Объект 'join_rain' не найден в окне {account.name} после обновления. Пропускаем окно.")
                 except Exception as e:
                     await plogging.error(f"Ошибка в окне {account.name}: {e}")
             await asyncio.sleep(1)
