@@ -19,7 +19,7 @@ class AccountWindow:
         # Загружаем шаблоны в оттенках серого
         self.rain_template = cv2.imread("resources/join_button.jpg", cv2.IMREAD_GRAYSCALE)
         self.rain_joined_template = cv2.imread("resources/joined_button.jpg", cv2.IMREAD_GRAYSCALE)
-        # Шаблон области Cloudflare, который появляется при загрузке/подтверждении
+        # Шаблон области Cloudflare (загрузка)
         self.cloudflare_template = cv2.imread("resources/loading.jpg", cv2.IMREAD_GRAYSCALE)
         # Шаблон кнопки подтверждения (например, "Я не робот")
         self.confirm_button_template = cv2.imread("resources/confirm_pls.jpg", cv2.IMREAD_GRAYSCALE)
@@ -56,6 +56,7 @@ class AccountWindow:
             scaled_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
             res = cv2.matchTemplate(frame, scaled_template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            await plogging.debug(f"Scale {scale:.2f}: max_val = {max_val:.3f}")
             if max_val > best_val:
                 best_val = max_val
                 best_loc = max_loc
@@ -106,7 +107,9 @@ class AccountWindow:
     async def wait_for_rain_completion(self, timeout=10):
         """
         Ожидает завершения загрузки/подтверждения рейна, т.е. появления статуса "RAIN JOINED".
-        При этом, если обнаруживается область Cloudflare, ищется и нажимается кнопка подтверждения.
+        Если обнаружена область Cloudflare (self.cloudflare_template), то:
+          - Если обнаружена кнопка подтверждения (self.confirm_button_template), кликаем по ней.
+          - Если кнопка подтверждения не обнаружена, считаем, что идёт стандартная загрузка (ничего нажимать не надо).
         Возвращает True, если статус изменился на "RAIN JOINED", иначе False по истечении timeout.
         """
         start_time = time.time()
@@ -115,17 +118,21 @@ class AccountWindow:
             if await self.check_rain_joined():
                 return True
 
-            # Если обнаружена область Cloudflare
-            cloudflare = await self.find_template(self.cloudflare_template)
-            if cloudflare:
-                await plogging.info("Обнаружена область Cloudflare, требуется подтверждение.")
-                # Пытаемся найти кнопку подтверждения
+            # Проверяем наличие области Cloudflare (загрузка)
+            loading = await self.find_template(self.cloudflare_template)
+            if loading:
+                await plogging.info("Область Cloudflare обнаружена (загрузка).")
+                # Если обнаружена кнопка подтверждения, значит требуется дополнительное действие
                 confirm = await self.find_template(self.confirm_button_template)
                 if confirm:
                     await plogging.info("Найдена кнопка подтверждения. Выполняем клик.")
                     await self.click_at(confirm)
+                    # Ждем немного после клика, чтобы подтверждение применилось
+                    await asyncio.sleep(1)
                 else:
-                    await plogging.debug("Кнопка подтверждения не обнаружена.")
+                    await plogging.debug("Кнопка подтверждения не обнаружена, обычная загрузка.")
+            else:
+                await plogging.debug("Область Cloudflare не обнаружена.")
             await asyncio.sleep(0.5)
         return False
 
