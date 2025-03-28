@@ -89,7 +89,6 @@ class AccountWindow:
             coord = await self.detect_object_yolo("join_rain", conf_threshold=0.9)
             if coord:
                 return coord
-            await plogging.debug("Объект 'join_rain' не обнаружен, повторная проверка через 1 сек.")
             await asyncio.sleep(1)
 
     async def check_rain_joined(self):
