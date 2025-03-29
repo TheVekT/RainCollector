@@ -34,7 +34,7 @@ def get_chrome_profile_name(window) -> str:
 class AccountWindow:
     def __init__(self, window):
         self.rain_connected = False
-        self.window = window
+        self.window: gw.Win32Window = window
         # Используем имя профиля вместо заголовка
         self.name = get_chrome_profile_name(window)
         self.match_threshold = 0.8
@@ -62,6 +62,7 @@ class AccountWindow:
         await asyncio.sleep(0.5)
 
     async def capture_screenshot(self, grayscale: bool = True):
+        self.focus()
         bbox = (self.window.left, self.window.top, self.window.width, self.window.height)
         image = pyautogui.screenshot(region=bbox)
         frame = np.array(image)
@@ -69,7 +70,7 @@ class AccountWindow:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         return frame
 
-    async def detect_object_yolo(self, target_label: str | tuple, conf_threshold: float = 0.9):
+    async def detect_object_yolo(self, target_label: str | tuple, conf_threshold: float = 0.85):
         frame = await self.capture_screenshot(grayscale=False)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.yolo_model(frame_rgb)
@@ -86,13 +87,14 @@ class AccountWindow:
 
     async def wait_for_rain(self):
         while True:
-            coord = await self.detect_object_yolo("join_rain", conf_threshold=0.9)
+            coord = await self.detect_object_yolo("join_rain", conf_threshold=0.85)
             if coord:
                 return coord
             await asyncio.sleep(1)
 
     async def check_rain_joined(self):
-        coord = await self.detect_object_yolo("rain_joined", conf_threshold=0.9)
+        self.focus()
+        coord = await self.detect_object_yolo("rain_joined", conf_threshold=0.85)
         return coord is not None
 
     async def click_at(self, coord):
@@ -102,7 +104,7 @@ class AccountWindow:
 
     async def refresh_page(self):
         pyautogui.press('f5')
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(3)
 
     async def wait_for_rain_completion(self, timeout=15):
         start_time = time.time()
@@ -110,7 +112,7 @@ class AccountWindow:
         while time.time() - start_time < timeout:
             if await self.check_rain_joined():
                 return True
-            cloudflare = await self.detect_object_yolo(("cloudflare_loading", "confirm_cloudflare"), conf_threshold=0.9)
+            cloudflare = await self.detect_object_yolo(("cloudflare_loading", "confirm_cloudflare"), conf_threshold=0.85)
             if cloudflare:
                 loading_detected = True
                 if cloudflare[2] == "confirm_cloudflare":
@@ -159,7 +161,7 @@ class RainCollector:
 
     @classmethod
     async def create(cls):
-        windows = []
+        windows: list[AccountWindow] = []
         for win in gw.getWindowsWithTitle("chromium"):
             if "bandit.camp" in win.title:
                 await plogging.info(win.title)
@@ -168,6 +170,8 @@ class RainCollector:
             await plogging.warn("Окна ungoogled‑chromium не найдены!")
         else:
             await plogging.info(f"Найдено {len(windows)} окно(а) для работы.")
+            for account in windows:
+                account.name = f"Profile number_{windows.index(account) + 1}"
         return cls(windows)
 
     async def run(self):
@@ -206,7 +210,7 @@ class RainCollector:
                         await plogging.warn(f"Не удалось присоединиться к рейну в окне {account.name}. Обновляем окно и повторяем попытку.")
                         await account.refresh_page()
                         await asyncio.sleep(1)
-                        coord = await account.detect_object_yolo("join_rain", conf_threshold=0.9)
+                        coord = await account.detect_object_yolo("join_rain", conf_threshold=0.85)
                         if coord:
                             await account.click_at(coord)
                             if await account.wait_for_rain_completion(timeout=10):
@@ -221,9 +225,14 @@ class RainCollector:
 
             # Если все окна успешно приняли рейн, ждем 20 минут
             if all(account.rain_connected for account in self.windows):
+                await plogging.info("Предварительно окна успешно приняли рейн, валидация")
+                for account in self.windows:
+                    if not await account.check_rain_joined():
+                        await plogging.error(f"В окне {account.name} рейн не принят. Пропускаем ожидание.")
+                        account.rain_connected = False
+                        continue
                 await plogging.info("Рейн успешно принят во всех окнах. Ждём 20 минут до следующей проверки.")
                 await asyncio.sleep(20 * 60)  # 20 минут
-                # Сбрасываем флаг для нового цикла
                 for account in self.windows:
                     account.rain_connected = False
             else:
