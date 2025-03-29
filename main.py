@@ -62,7 +62,7 @@ class AccountWindow:
         await asyncio.sleep(0.5)
 
     async def capture_screenshot(self, grayscale: bool = True):
-        self.focus()
+        await self.focus()
         bbox = (self.window.left, self.window.top, self.window.width, self.window.height)
         image = pyautogui.screenshot(region=bbox)
         frame = np.array(image)
@@ -93,7 +93,7 @@ class AccountWindow:
             await asyncio.sleep(1)
 
     async def check_rain_joined(self):
-        self.focus()
+        await self.focus()
         coord = await self.detect_object_yolo("rain_joined", conf_threshold=0.85)
         return coord is not None
 
@@ -170,8 +170,10 @@ class RainCollector:
             await plogging.warn("Окна ungoogled‑chromium не найдены!")
         else:
             await plogging.info(f"Найдено {len(windows)} окно(а) для работы.")
+            await plogging.info("Список окон: ")
             for account in windows:
                 account.name = f"Profile number_{windows.index(account) + 1}"
+                await plogging.info(f"- {account.name}")
         return cls(windows)
 
     async def run(self):
