@@ -53,7 +53,7 @@ class AccountWindow:
             self.window.restore()
             await asyncio.sleep(0.5)
         # Проверка: окно должно быть активно и видно
-        if not self.window.isActive or not self.window.isVisible():
+        if not self.window.isActive or not self.window.visible():
             await plogging.warn(f"Окно профиля {self.name} не активно или не видно на экране.")
         try:
             self.window.activate()
