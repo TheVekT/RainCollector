@@ -166,6 +166,7 @@ class RainCollector:
     
     def _start_asyncio_tasks(self):
         asyncio.create_task(self.reset_rain_status())
+        asyncio.create_task(self.check_bugged_windows())
 
     @classmethod
     async def create(cls):
