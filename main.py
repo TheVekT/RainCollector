@@ -162,7 +162,7 @@ class RainCollector:
         self.windows: list[AccountWindow] = windows
         self.last_rain_time = time.time()  # время последнего успешного рейна
         self.rain_searching = True
-        self._start_asyncio_tasks()
+        #self._start_asyncio_tasks()
     
     def _start_asyncio_tasks(self):
         asyncio.create_task(self.reset_rain_status())
@@ -187,30 +187,33 @@ class RainCollector:
     
     async def check_bugged_windows(self):
         while True:
+            await asyncio.sleep(5)
             if not self.rain_searching:
                 await asyncio.sleep(240)
                 await plogging.info("Проверяем окна на зависание...")
                 for account in self.windows:
                     await plogging.info(f"Проверяем окно: {account.name}")
-                    is_bugged = account.detect_object_yolo("bandit_loading", conf_threshold=0.85)
+                    is_bugged = await account.detect_object_yolo("bandit_loading", conf_threshold=0.85)
                     if is_bugged is not None:
                         await asyncio.sleep(3)
-                        is_bugged = account.detect_object_yolo("bandit_loading", conf_threshold=0.85)
+                        is_bugged = await account.detect_object_yolo("bandit_loading", conf_threshold=0.85)
                         if is_bugged is not None:
                             await plogging.info(f"Окно {account.name} зависло. Обновляем страницу.")
                             await account.refresh_page()
                             await asyncio.sleep(3)
                             await plogging.info(f"Проверяем окно {account.name} на зависание после обновления.")
-                            is_bugged = account.detect_object_yolo("bandit_loading", conf_threshold=0.85)
+                            is_bugged = await account.detect_object_yolo("bandit_loading", conf_threshold=0.85)
                             if is_bugged is not None:
                                 await plogging.error(f"Окно {account.name} всё ещё зависло. Закрываем окно.")
                                 account.window.close()
                                 self.windows.remove(account)
+            else:
+                await asyncio.sleep(1)
                         
     
     async def reset_rain_status(self):
         while True:
-            await asyncio.sleep(5)  # Проверяем каждые 1 секунду
+            await asyncio.sleep(5)
             if self.rain_start_time and time.time() - self.rain_start_time >= 180:
                 await plogging.info("Прошло 3 минуты с начала рейна — сбрасываем статус 'rain_connected' у всех окон.")
                 for account in self.windows:
@@ -287,11 +290,15 @@ class RainCollector:
             else:
                 # Если не во всех окнах рейн принят, делаем короткую паузу и повторяем цикл
                 await asyncio.sleep(1)
-
-
+                
 async def main():
     collector = await RainCollector.create()
-    await collector.run()
+    # Запускаем все три цикла параллельно в одном event loop
+    task_run = asyncio.create_task(collector.run())
+    task_reset = asyncio.create_task(collector.reset_rain_status())
+    task_bugged = asyncio.create_task(collector.check_bugged_windows())
+    await asyncio.gather(task_run, task_reset, task_bugged)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
