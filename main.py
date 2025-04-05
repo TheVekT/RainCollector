@@ -165,7 +165,8 @@ class RainCollector:
         self.windows: list[AccountWindow] = windows
         self.last_rain_time = time.time()
         self.rain_start_time = None
-
+        self.global_cache = {}
+        
     @classmethod
     async def create(cls):
         windows: list[AccountWindow] = []
