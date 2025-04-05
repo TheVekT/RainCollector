@@ -37,11 +37,10 @@ class AccountWindow:
         self.window: gw.Win32Window = window
         self.name = get_chrome_profile_name(window)
         self.match_threshold = 0.8
-        # Кэш для результатов детекции: { label: (center, conf, timestamp) }
-        self.cache = {}
-        self.cache_task = None
 
-        # Инициализируем YOLOv8 модель (укажите корректный путь к модели)
+        # Нет локального кэша – теперь кэш общий (в RainCollector)
+
+        # Инициализируем YOLOv8 модель
         self.yolo_model = YOLO("best.pt")
 
         # Резервные шаблоны
@@ -49,54 +48,6 @@ class AccountWindow:
         self.rain_joined_template = cv2.imread("resources/joined_button.jpg", cv2.IMREAD_GRAYSCALE)
         self.cloudflare_template = cv2.imread("resources/loading.jpg", cv2.IMREAD_GRAYSCALE)
         self.confirm_button_template = cv2.imread("resources/confirm_pls.jpg", cv2.IMREAD_GRAYSCALE)
-
-    async def start_cache(self, interval=1.0):
-        """Запускает фоновую задачу обновления кэша для данного окна."""
-        self.cache_task = asyncio.create_task(self.update_cache(interval))
-
-    async def stop_cache(self):
-        """Останавливает фоновую задачу обновления кэша, если она запущена."""
-        if self.cache_task:
-            self.cache_task.cancel()
-            try:
-                await self.cache_task
-            except asyncio.CancelledError:
-                pass
-            self.cache_task = None
-
-    async def update_cache(self, interval=1.0):
-        """
-        Фоновая задача: каждые interval секунд делаем скриншот и обновляем кэш детекции.
-        """
-        while True:
-            frame = await self.capture_screenshot(grayscale=False)
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = self.yolo_model(frame_rgb)
-            detections = results[0].boxes.data.cpu().numpy() if (results and results[0].boxes.data is not None) else np.array([])
-            new_cache = {}
-            for detection in detections:
-                x1, y1, x2, y2, conf, cls = detection
-                if conf >= 0.85:
-                    label = self.yolo_model.model.names[int(cls)]
-                    center = (self.window.left + int((x1 + x2) / 2),
-                              self.window.top + int((y1 + y2) / 2))
-                    new_cache[label] = (center, conf, time.time())
-            self.cache = new_cache
-            await asyncio.sleep(interval)
-
-    async def get_cached_detection(self, target_label: str | tuple, max_age=1.5):
-        """
-        Возвращает из кэша объект с нужной меткой, если он обновлён не более max_age секунд.
-        """
-        now = time.time()
-        if isinstance(target_label, tuple):
-            for label in target_label:
-                if label in self.cache and now - self.cache[label][2] <= max_age:
-                    return (*self.cache[label][0], label)
-        else:
-            if target_label in self.cache and now - self.cache[target_label][2] <= max_age:
-                return (*self.cache[target_label][0], target_label)
-        return None
 
     async def focus(self):
         if self.window.isMinimized:
@@ -119,22 +70,6 @@ class AccountWindow:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         return frame
 
-    # Методы, использующие кэш
-    async def detect_object_from_cache(self, target_label: str | tuple, conf_threshold: float = 0.85):
-        return await self.get_cached_detection(target_label, max_age=1.5)
-
-    async def wait_for_rain(self):
-        while True:
-            coord = await self.detect_object_from_cache("join_rain", conf_threshold=0.85)
-            if coord:
-                return coord
-            await asyncio.sleep(1)
-
-    async def check_rain_joined(self):
-        await self.focus()
-        coord = await self.detect_object_from_cache("rain_joined", conf_threshold=0.85)
-        return coord is not None
-
     async def click_at(self, coord):
         pyautogui.moveTo(coord[0], coord[1], duration=0.3, tween=pyautogui.easeInOutQuad)
         pyautogui.click()
@@ -143,32 +78,6 @@ class AccountWindow:
     async def refresh_page(self):
         pyautogui.press('f5')
         await asyncio.sleep(3)
-
-    async def wait_for_rain_completion(self, timeout=15):
-        start_time = time.time()
-        loading_detected = False
-        while time.time() - start_time < timeout:
-            if await self.check_rain_joined():
-                return True
-            cloudflare = await self.get_cached_detection(("cloudflare_loading", "confirm_cloudflare"), max_age=1.5)
-            if cloudflare:
-                loading_detected = True
-                if cloudflare[2] == "confirm_cloudflare":
-                    confirm = (cloudflare[0], cloudflare[1])
-                    await plogging.info("Найдена кнопка подтверждения (confirm_cloudflare). Выполняем клик.")
-                    await self.click_at(confirm)
-                    await asyncio.sleep(1)
-                else:
-                    await plogging.info("Загрузка активна (cloudflare_loading обнаружен).")
-            else:
-                if loading_detected:
-                    if await self.check_rain_joined():
-                        await plogging.info("Статус 'rain_joined' обнаружен после загрузки.")
-                        return True
-                    else:
-                        await plogging.info("Загрузка завершилась, но статус ещё не обновлён. Продолжаем ожидание.")
-            await asyncio.sleep(0.5)
-        return False
 
     async def find_template(self, template):
         frame = await self.capture_screenshot()
@@ -194,9 +103,11 @@ class AccountWindow:
 
 class RainCollector:
     def __init__(self, windows):
-        self.rain_start_time = None
         self.windows: list[AccountWindow] = windows
         self.last_rain_time = time.time()
+        self.rain_start_time = None
+        # Глобальный кэш детекции: { window_name: { label: (center, conf, timestamp) } }
+        self.global_cache = {}
 
     @classmethod
     async def create(cls):
@@ -214,29 +125,106 @@ class RainCollector:
                 account.name = f"Profile number_{windows.index(account) + 1}"
                 await plogging.info(f"- {account.name}")
         return cls(windows)
-    
+
+    async def update_global_cache(self, interval=1.0):
+        """
+        Фоновая задача: обновляет кэш детекции для всех окон.
+        Результаты сохраняются в self.global_cache, ключ – имя окна.
+        """
+        while True:
+            for account in self.windows:
+                await account.focus()
+                frame = await account.capture_screenshot(grayscale=False)
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results = account.yolo_model(frame_rgb)
+                detections = (results[0].boxes.data.cpu().numpy() 
+                              if (results and results[0].boxes.data is not None) 
+                              else np.array([]))
+                new_cache = {}
+                for detection in detections:
+                    x1, y1, x2, y2, conf, cls = detection
+                    if conf >= 0.85:
+                        label = account.yolo_model.model.names[int(cls)]
+                        center = (account.window.left + int((x1+x2)/2),
+                                  account.window.top + int((y1+y2)/2))
+                        new_cache[label] = (center, conf, time.time())
+                self.global_cache[account.name] = new_cache
+            await asyncio.sleep(interval)
+
+    def get_cached_detection(self, account: AccountWindow, target_label: str | tuple, max_age=1.5):
+        """
+        Возвращает из глобального кэша для данного окна объект с нужной меткой,
+        если обновлён не более max_age секунд.
+        """
+        now = time.time()
+        acc_cache = self.global_cache.get(account.name, {})
+        if isinstance(target_label, tuple):
+            for label in target_label:
+                if label in acc_cache and now - acc_cache[label][2] <= max_age:
+                    return (*acc_cache[label][0], label)
+        else:
+            if target_label in acc_cache and now - acc_cache[target_label][2] <= max_age:
+                return (*acc_cache[target_label][0], target_label)
+        return None
+
+    async def wait_for_rain_for_account(self, account: AccountWindow):
+        while True:
+            coord = self.get_cached_detection(account, "join_rain", max_age=1.5)
+            if coord:
+                return coord
+            await asyncio.sleep(1)
+
+    async def check_rain_joined_for_account(self, account: AccountWindow):
+        coord = self.get_cached_detection(account, "rain_joined", max_age=1.5)
+        return coord is not None
+
+    async def wait_for_rain_completion_for_account(self, account: AccountWindow, timeout=15):
+        start_time = time.time()
+        loading_detected = False
+        while time.time() - start_time < timeout:
+            if await self.check_rain_joined_for_account(account):
+                return True
+            cloudflare = self.get_cached_detection(account, ("cloudflare_loading", "confirm_cloudflare"), max_age=1.5)
+            if cloudflare:
+                loading_detected = True
+                if cloudflare[2] == "confirm_cloudflare":
+                    confirm = (cloudflare[0], cloudflare[1])
+                    await plogging.info(f"В окне {account.name} найдена кнопка подтверждения (confirm_cloudflare). Выполняем клик.")
+                    pyautogui.moveTo(confirm[0], confirm[1], duration=0.3, tween=pyautogui.easeInOutQuad)
+                    pyautogui.click()
+                    await asyncio.sleep(1)
+                else:
+                    await plogging.info(f"В окне {account.name} обнаружена загрузка (cloudflare_loading).")
+            else:
+                if loading_detected:
+                    if await self.check_rain_joined_for_account(account):
+                        await plogging.info(f"В окне {account.name} статус 'rain_joined' обнаружен после загрузки.")
+                        return True
+                    else:
+                        await plogging.info(f"В окне {account.name} загрузка завершилась, но статус не обновился. Продолжаем ожидание.")
+            await asyncio.sleep(0.5)
+        return False
+
     async def check_bugged_windows(self):
         while True:
             await asyncio.sleep(5)
             await plogging.info("Проверяем окна на зависание...")
-            for account in self.windows:
-                await asyncio.sleep(1)
-                await plogging.info(f"Проверяем окно: {account.name}")
-                bug = await account.get_cached_detection("bandit_loading", max_age=1.5)
+            for account in self.windows.copy():
+                bug = self.get_cached_detection(account, "bandit_loading", max_age=1.5)
                 if bug is not None:
                     await asyncio.sleep(3)
-                    bug = await account.get_cached_detection("bandit_loading", max_age=1.5)
+                    bug = self.get_cached_detection(account, "bandit_loading", max_age=1.5)
                     if bug is not None:
                         await plogging.info(f"Окно {account.name} зависло. Обновляем страницу.")
                         await account.refresh_page()
                         await asyncio.sleep(3)
-                        await plogging.info(f"Проверяем окно {account.name} на зависание после обновления.")
-                        bug = await account.get_cached_detection("bandit_loading", max_age=1.5)
+                        await plogging.info(f"Проверяем окно {account.name} после обновления.")
+                        bug = self.get_cached_detection(account, "bandit_loading", max_age=1.5)
                         if bug is not None:
                             await plogging.error(f"Окно {account.name} всё ещё зависло. Закрываем окно.")
                             account.window.close()
                             self.windows.remove(account)
-
+            await asyncio.sleep(1)
     
     async def reset_rain_status(self):
         while True:
@@ -248,8 +236,9 @@ class RainCollector:
                 self.rain_start_time = None
     
     async def run(self):
+        # Запускаем глобальное обновление кэша для всех окон
+        global_cache_task = asyncio.create_task(self.update_global_cache(interval=1.0))
         while True:
-            # Если прошло больше часа с последнего рейна, обновляем проблемные окна
             if time.time() - self.last_rain_time > 3600:
                 await plogging.info("Прошел более часа с последнего рейна. Обновляем проблемные окна.")
                 for account in self.windows:
@@ -257,56 +246,55 @@ class RainCollector:
                         await account.refresh_page()
                 self.last_rain_time = time.time()
             
-            # Обрабатываем окна последовательно – текущее окно обрабатывается до завершения рейна
+            # Обработка окон последовательно: обрабатываем одно окно до завершения рейна
             for account in self.windows:
                 if account.rain_connected:
                     continue
 
-                # Запускаем кэш-обновление только для текущего окна
-                await account.start_cache()
                 await account.focus()
                 await plogging.info(f"Проверяем окно: {account.name}")
                 try:
-                    if await account.check_rain_joined():
+                    if await self.check_rain_joined_for_account(account):
                         await plogging.info(f"В окне {account.name} уже присоединились к рейну.")
                         account.rain_connected = True
-                        await account.stop_cache()
                         continue
 
-                    await plogging.info("Ожидание появления объекта 'join_rain'...")
-                    coord = await account.wait_for_rain()
+                    await plogging.info(f"Ожидание появления объекта 'join_rain' в окне {account.name}...")
+                    coord = await self.wait_for_rain_for_account(account)
                     if self.rain_start_time is None:
                         self.rain_start_time = time.time()
-                    await plogging.info(f"Объект 'join_rain' обнаружен в окне {account.name} по координатам {coord}. Выполняем клик.")
-                    await account.click_at(coord)
-                    await plogging.info("Ожидание завершения загрузки рейна...")
-                    if await account.wait_for_rain_completion(timeout=15):
+                    await plogging.info(f"В окне {account.name} обнаружен 'join_rain' по координатам {coord}. Выполняем клик.")
+                    pyautogui.moveTo(coord[0], coord[1], duration=0.3, tween=pyautogui.easeInOutQuad)
+                    pyautogui.click()
+                    await asyncio.sleep(0.2)
+                    await plogging.info(f"Ожидание завершения загрузки рейна в окне {account.name}...")
+                    if await self.wait_for_rain_completion_for_account(account, timeout=15):
                         await plogging.info(f"В окне {account.name} успешно присоединились к рейну.")
                         account.rain_connected = True
                     else:
-                        await plogging.warn(f"Не удалось присоединиться к рейну в окне {account.name}. Обновляем окно и повторяем попытку.")
+                        await plogging.warn(f"В окне {account.name} не удалось присоединиться к рейну. Обновляем окно и повторяем попытку.")
                         await account.refresh_page()
                         await asyncio.sleep(1)
-                        coord = await account.get_cached_detection("join_rain", max_age=1.5)
+                        coord = self.get_cached_detection(account, "join_rain", max_age=1.5)
                         if coord:
-                            await account.click_at(coord)
-                            if await account.wait_for_rain_completion(timeout=10):
+                            pyautogui.moveTo(coord[0], coord[1], duration=0.3, tween=pyautogui.easeInOutQuad)
+                            pyautogui.click()
+                            await asyncio.sleep(0.2)
+                            if await self.wait_for_rain_completion_for_account(account, timeout=10):
                                 await plogging.info(f"В окне {account.name} успешно присоединились к рейну после обновления.")
                                 account.rain_connected = True
                             else:
-                                await plogging.error(f"Присоединение к рейну в окне {account.name} не удалось после обновления. Пропускаем окно.")
+                                await plogging.error(f"В окне {account.name} не удалось присоединиться к рейну после обновления. Пропускаем окно.")
                         else:
                             await plogging.error(f"Объект 'join_rain' не найден в окне {account.name} после обновления. Пропускаем окно.")
                 except Exception as e:
                     await plogging.error(f"Ошибка в окне {account.name}: {e}")
-                await account.stop_cache()
 
-            # Если все окна успешно приняли рейн, проводим валидацию
             if all(account.rain_connected for account in self.windows):
                 await plogging.info("Все окна успешно приняли рейн, начинаем валидацию.")
                 all_valid = True
                 for account in self.windows:
-                    if not await account.check_rain_joined():
+                    if not await self.check_rain_joined_for_account(account):
                         await plogging.error(f"В окне {account.name} рейн не принят при валидации.")
                         account.rain_connected = False
                         all_valid = False
@@ -327,13 +315,21 @@ class RainCollector:
                         account.rain_connected = False
                     self.rain_start_time = None
                 await asyncio.sleep(1)
+    
+    async def shutdown(self):
+        # Отменяем глобальный таск обновления кэша
+        # Можно добавить дополнительную очистку при завершении
+        pass
 
 async def main():
     collector = await RainCollector.create()
     task_run = asyncio.create_task(collector.run())
     task_reset = asyncio.create_task(collector.reset_rain_status())
     task_bugged = asyncio.create_task(collector.check_bugged_windows())
-    await asyncio.gather(task_run, task_reset, task_bugged)
+    # Запускаем глобальное обновление кэша для всех окон
+    task_global_cache = asyncio.create_task(collector.update_global_cache(interval=1.0))
+    await asyncio.gather(task_run, task_reset, task_bugged, task_global_cache)
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
