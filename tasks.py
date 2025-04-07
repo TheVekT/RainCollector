@@ -1,7 +1,6 @@
 import asyncio
 from functools import wraps
 
-
 class ManagedTask:
     def __init__(self, func, interval):
         self.func = func
@@ -11,49 +10,52 @@ class ManagedTask:
         self._paused.set()  # не на паузе
         self._stop_event = asyncio.Event()
         self._stop_event.clear()
-        self._cancelled = False
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        # Возвращаем объект, который привязан к экземпляру
+        return BoundManagedTask(self, instance)
+
+class BoundManagedTask:
+    def __init__(self, managed_task, instance):
+        self.managed_task = managed_task
+        self.instance = instance
 
     def start(self, *args, **kwargs):
-        if self._task and not self._task.done():
+        if self.managed_task._task and not self.managed_task._task.done():
             return
-        self._stop_event.clear()
-        self._paused.set()
-        self._task = asyncio.create_task(self._runner(*args, **kwargs))
-
+        self.managed_task._stop_event.clear()
+        self.managed_task._paused.set()
+        self.managed_task._task = asyncio.create_task(self._runner(*args, **kwargs))
 
     def stop(self):
-        if self._task:
-            self._stop_event.set()
-
+        if self.managed_task._task:
+            self.managed_task._stop_event.set()
 
     def pause(self):
-        self._paused.clear()
-
+        self.managed_task._paused.clear()
 
     def resume(self):
-        self._paused.set()
+        self.managed_task._paused.set()
 
     def cancel(self):
-        if self._task:
-            self._task.cancel()
-            self._stop_event.set()
-            self._paused.set()
-            self._cancelled = True
-
+        if self.managed_task._task:
+            self.managed_task._task.cancel()
+            self.managed_task._stop_event.set()
+            self.managed_task._paused.set()
 
     async def _runner(self, *args, **kwargs):
-        while not self._stop_event.is_set():
-            await self._paused.wait()
+        while not self.managed_task._stop_event.is_set():
+            await self.managed_task._paused.wait()
             try:
-                await self.func(*args, **kwargs)
+                # Передаем экземпляр (self) в функцию
+                await self.managed_task.func(self.instance, *args, **kwargs)
             except asyncio.CancelledError:
                 break
-            await asyncio.sleep(self.interval)
+            await asyncio.sleep(self.managed_task.interval)
 
-        
 def loop(seconds):
     def decorator(func):
-        task = ManagedTask(func, seconds)
-        func.task = task  # добавим ссылку на объект ManagedTask
-        return task
+        return ManagedTask(func, seconds)
     return decorator

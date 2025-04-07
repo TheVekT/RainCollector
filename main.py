@@ -34,10 +34,9 @@ class AccountWindow:
                 await plogging.error("Объект окна не задан (None). Не могу установить фокус.")
                 return False
             try:
-                self.window.minimize()
-                await asyncio.sleep(0.1)
-                self.window.restore()
-                await asyncio.sleep(0.1)
+                if not self.window.isActive:
+                    self.window.restore()
+                    await asyncio.sleep(0.1)
 
                 self.window.activate()
                 await asyncio.sleep(0.1)
@@ -250,12 +249,14 @@ class RainCollector:
         self.update_detections.start()
         self.ref_page.start()
         self.check_bug_window.start()
+        
         self.current_window = self.windows[0]
         while True:
             await self.current_window.focus_window()
             rain = self.current_detections.get("join_rain", None)
             joined = self.current_detections.get("rain_joined", None)
             while not rain or not joined:
+                await asyncio.sleep(0.7)
                 rain = self.current_detections.get("join_rain", None)
                 joined = self.current_detections.get("rain_joined", None)
             if rain:
@@ -335,7 +336,6 @@ class RainCollector:
 
             # Вызываем модель напрямую (YOLOv8 возвращает список результатов)
             results = self.yolo(frame)  # вызов модели
-            
             # Инициализируем словарь для результатов
             detection_dict = {}
             
@@ -384,8 +384,8 @@ async def main():
     yolo_model = YOLO("best.pt")
     collector = RainCollector(Yolo=yolo_model)
     await collector.update_windows()
-    await asyncio.gather(collector.run())
-
+    await collector.run()
+    
 
 
 if __name__ == "__main__":
