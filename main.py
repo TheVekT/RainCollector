@@ -86,7 +86,7 @@ class RainCollector:
         self.start_rain_time = time.time()
         self.yolo = Yolo
         self.current_detections = {}
-        self.confidence_threshold = 0.86
+        self.confidence_threshold = 0.88
         self.rain_now = False
         self.current_window = None
         
@@ -106,14 +106,18 @@ class RainCollector:
                 await plogging.info(f"- {account.name}")
         self.windows = windows
 
-    async def capture_screenshot(self, window: AccountWindow, grayscale: bool = False):
-        await window.focus_window()
+    async def capture_screenshot(self, grayscale: bool = False):
+        #await window.focus_window()  # Если нужно, оставьте фокус на окне
         await asyncio.sleep(1)
-        bbox = (window.window.left, window.window.top, window.window.width, window.window.height)
-        image = pyautogui.screenshot(region=bbox)
+        image = pyautogui.screenshot()  # Скриншот всего монитора
         frame = np.array(image)
+
+        # Преобразуем RGB в BGR (PyAutoGUI возвращает RGB, OpenCV работает с BGR)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
         if grayscale:
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Преобразуем в оттенки серого, если нужно
+
         return frame
     
     async def isLoading(self, window: AccountWindow) -> bool:
@@ -210,7 +214,7 @@ class RainCollector:
         if not self.current_window:
             self.windows[0].focus_window()
             self.current_window = self.windows[0]
-        self.current_detections = await self.detect_objects(self.current_window)
+        self.current_detections = await self.detect_objects()
         
     @loop(seconds=900)
     async def ref_page(self):
@@ -316,7 +320,7 @@ class RainCollector:
                 
             
         
-    async def detect_objects(self, window: AccountWindow, grayscale: bool = False) -> dict:
+    async def detect_objects(self, grayscale: bool = False) -> dict:
         """
         Захватывает скриншот окна (с помощью метода capture_screenshot),
         пропускает изображение через модель YOLOv8 (ultralytics) и возвращает словарь с детекциями.
@@ -328,7 +332,7 @@ class RainCollector:
         """
         try:
             # Захватываем скриншот через существующий метод
-            frame = await self.capture_screenshot(window, grayscale)
+            frame = await self.capture_screenshot(grayscale)
 
             # Если требуется, преобразуем изображение в формат BGR для OpenCV (ultralytics YOLO ожидает RGB, как правило)
             # Но обычно YOLO из ultralytics принимает NumPy-массивы в формате BGR или RGB, в зависимости от модели.
