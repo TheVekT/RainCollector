@@ -35,9 +35,9 @@ class AccountWindow:
                 return False
             try:
                 if not self.window.isActive:
-                    self.window.restore()
-                    await asyncio.sleep(0.1)
-
+                    if self.window.isMinimized:
+                        self.window.restore()
+                        await asyncio.sleep(0.1)
                 self.window.activate()
                 await asyncio.sleep(0.1)
 
