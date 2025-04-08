@@ -83,10 +83,10 @@ class AccountWindow:
 class RainCollector:
     def __init__(self, Yolo: YOLO):
         self.windows: list[AccountWindow] = []
-        self.start_rain_time = time.time()
+        self.start_rain_time = None
         self.yolo = Yolo
         self.current_detections = {}
-        self.confidence_threshold = 0.88
+        self.confidence_threshold = 0.85
         self.rain_now = False
         self.current_window = None
         
@@ -107,7 +107,7 @@ class RainCollector:
         self.windows = windows
 
     async def capture_screenshot(self, grayscale: bool = False):
-        #await window.focus_window()  # Если нужно, оставьте фокус на окне
+        await self.current_window.focus_window()  # Если нужно, оставьте фокус на окне
         await asyncio.sleep(1)
         image = pyautogui.screenshot()  # Скриншот всего монитора
         frame = np.array(image)
@@ -214,6 +214,7 @@ class RainCollector:
         if not self.current_window:
             self.windows[0].focus_window()
             self.current_window = self.windows[0]
+        print(self.current_detections)
         self.current_detections = await self.detect_objects()
         
     @loop(seconds=900)
@@ -250,70 +251,108 @@ class RainCollector:
         if not self.windows:
             await plogging.error("Нет доступных окон для работы.")
             raise ValueError("Нет доступных окон для работы.")
+        # Запускаем фоновые задачи (обновление детекций, обновление страницы и проверку окон на зависание)
         self.update_detections.start()
         self.ref_page.start()
         self.check_bug_window.start()
-        
+
+        # Начинаем с первого окна
         self.current_window = self.windows[0]
+
         while True:
+            # Фокусируем текущее окно
             await self.current_window.focus_window()
+
+            # Ждем, пока в текущем окне не появится хоть один из объектов: join_rain или rain_joined.
             rain = self.current_detections.get("join_rain", None)
             joined = self.current_detections.get("rain_joined", None)
-            while not rain or not joined:
+            while rain is None and joined is None:
                 await asyncio.sleep(0.7)
                 rain = self.current_detections.get("join_rain", None)
                 joined = self.current_detections.get("rain_joined", None)
-            if rain:
-                self.start_rain_time = time.time()
-                while time.time() - self.start_rain_time < 180:
-                    self.rain_now = True
-                    await plogging.info("Рейн обнаружен")
-                    for window in self.windows:
-                        self.current_window = window
-                        await window.focus_window()
-                        await asyncio.sleep(0.5)
+
+            # Как только обнаружили хотя бы один из объектов, фиксируем время начала рейна (если еще не зафиксировано)
+            if self.rain_start_time is None:
+                self.rain_start_time = time.time()
+
+            # Пока прошло менее 3 минут с начала рейна (режим сбора рейна)
+            while time.time() - self.rain_start_time < 180:
+                self.rain_now = True
+                await plogging.info("Рейн обнаружен. Обрабатываем окна.")
+
+                # Перебираем окна последовательно
+                for window in self.windows:
+                    self.current_window = window
+                    await window.focus_window()
+                    # Обновляем данные из глобального кэша для текущего окна
+                    for i in range(0, 4, 1):
                         rain = self.current_detections.get("join_rain", None)
                         rain_joined = self.current_detections.get("rain_joined", None)
-                        if rain_joined:
-                            await plogging.info(f"Окно {window.name} уже присоеденено к рейну.")
-                            self.current_window.rain_connected = True
-                            continue
-                        if not rain:
-                            await plogging.error(f"Не удалось найти рейн в окне {window.name} хотя рейн идет.")
-                            await window.refresh_page()
+                        if rain or rain_joined:
+                            break
+                        else:
                             await asyncio.sleep(0.7)
+                    # Если окно уже получило рейн, помечаем его и переходим к следующему
+                    if rain_joined:
+                        await plogging.info(f"Окно {window.name} уже присоединилось к рейну.")
+                        window.rain_connected = True
+                        continue
+
+                    # Если объекта join_rain нет (хотя по логике рейн должен идти), пытаемся обновить страницу и получить его
+                    if not rain:
+                        await plogging.error(f"Не удалось найти рейн в окне {window.name} хотя рейн идет.")
+                        await window.refresh_page()
+                        for i in range(0, 4, 1):
                             rain = self.current_detections.get("join_rain", None)
-                            if not rain:
-                                await plogging.error(f"Не удалось найти рейн в окне {window.name} даже после обновления страницы.")
-                                continue
+                            if rain:
+                                break
                             else:
-                                await self.rain_collect(rain)
+                                await asyncio.sleep(0.7)
+                        if not rain:
+                            await plogging.error(f"Не удалось найти рейн в окне {window.name} даже после обновления.")
                             continue
-                        await self.rain_collect(rain)
-                    await plogging.info("Предварительнов все окна присоединились к рейну. Валидация.")
-                    for window in self.windows:
-                        self.current_window = window
-                        await window.focus_window()
-                        await asyncio.sleep(0.7)
-                        rain_joined = self.current_detections.get("rain_joined", None)  
-                        if rain_joined:
-                            await plogging.info(f"При валидации, обнаружено что {window.name} присоеденено к рейну.")
-                            self.current_window.rain_connected = True
-                            continue
-                        elif self.current_detections.get("join_rain", None):
-                            await plogging.info(f"При валидации, обнаружено что {window.name} не присоеденено к рейну. Пробуем присоединиться.")
-                            self.current_window.rain_connected = False
-                            await self.rain_collect(self.current_detections.get("join_rain", None))
-                            continue
-                    if all(window.rain_connected for window in self.windows):
-                        await plogging.info("Все окна успешно присоединились к рейну.")
-                self.rain_now = False
-                await plogging.info("Рейн закончился")
+                        else:
+                            await self.rain_collect(rain)
+                        continue
+
+                    # Если обнаружен объект join_rain – пробуем принять рейн
+                    await self.rain_collect(rain)
+
+                # Выполняем валидацию: проходим по всем окнам и проверяем, все ли получило рейн
+                await plogging.info("Проводим валидацию: проверяем, все ли окна получили рейн.")
                 for window in self.windows:
-                    window.rain_connected = False  
-                await plogging.info("Ожидаем 20 минут до следующего рейна.")
-                await asyncio.sleep(1200)
-                await plogging.info("20 минут ожидания завершены. Проверяем окна на наличие рейна.")    
+                    self.current_window = window
+                    await window.focus_window()
+                    for i in range(0, 4, 1):
+                        rain_joined = self.current_detections.get("rain_joined", None)
+                        if rain_joined:
+                            break
+                        else:
+                            await asyncio.sleep(0.7)
+                    if rain_joined:
+                        await plogging.info(f"При валидации, окно {window.name} получило рейн.")
+                        window.rain_connected = True
+                        continue
+                    elif self.current_detections.get("join_rain", None):
+                        await plogging.info(f"При валидации, окно {window.name} не получило рейн. Пробуем присоединить.")
+                        window.rain_connected = False
+                        await self.rain_collect(self.current_detections.get("join_rain", None))
+                        continue
+
+                # Если все окна получили рейн, выходим из цикла рейна
+                if all(window.rain_connected for window in self.windows):
+                    await plogging.info("Все окна успешно присоединились к рейну.")
+                    break
+
+            # Рейн закончился – сбрасываем флаги и ждём 20 минут до следующего рейна
+            self.rain_now = False
+            await plogging.info("Рейн закончился. Сбрасываем статус окон.")
+            for window in self.windows:
+                window.rain_connected = False
+            await plogging.info("Ожидаем 20 минут до следующего рейна.")
+            await asyncio.sleep(20 * 60)
+            await plogging.info("20 минут ожидания завершены. Начинаем новый цикл.")
+            self.rain_start_time = None
                 
                         
                 
@@ -379,11 +418,6 @@ class RainCollector:
             await plogging.error(f"Ошибка при детекции объектов: {e}")
             return {}
 
-        except Exception as e:
-            # Логируем ошибку, если что-то пошло не так
-            await plogging.error(f"Ошибка при детекции объектов: {e}")
-            return {}
-        
 async def main():
     yolo_model = YOLO("best.pt")
     collector = RainCollector(Yolo=yolo_model)
