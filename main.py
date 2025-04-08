@@ -49,26 +49,6 @@ class AccountWindow:
                     await plogging.warn("Окно не получило фокус после попытки activate(). Переходим к резервному варианту.")
             except Exception as activate_error:
                 await plogging.warn(f"Ошибка при попытке activate(): {activate_error}")
-
-            # Резервный способ — клик в центр окна
-            try:
-                left = self.window.left
-                top = self.window.top
-                width = self.window.width
-                height = self.window.height
-                center_x = left + width // 2
-                center_y = top + height // 2
-                pyautogui.click(center_x, center_y)
-                await asyncio.sleep(0.3)
-
-                if self.window.isActive:
-                    await plogging.info(f"Фокус установлен через клик по координатам ({center_x}, {center_y}).")
-                    return True
-                else:
-                    await plogging.warn("Клик выполнен, но окно не стало активным.")
-            except Exception as click_error:
-                await plogging.error(f"Не удалось установить фокус кликом: {click_error}")
-
         except Exception as e:
             await plogging.error(f"Ошибка при установке фокуса: {e}")
         
