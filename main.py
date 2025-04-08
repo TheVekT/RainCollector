@@ -278,7 +278,7 @@ class RainCollector:
                         rain = self.current_detections.get("join_rain", None)
                         rain_joined = self.current_detections.get("rain_joined", None)
                         if rain or rain_joined:
-                            break
+                            pass
                         else:
                             await asyncio.sleep(0.7)
                     # Если окно уже получило рейн, помечаем его и переходим к следующему
@@ -294,7 +294,7 @@ class RainCollector:
                         for i in range(0, 4, 1):
                             rain = self.current_detections.get("join_rain", None)
                             if rain:
-                                break
+                                pass
                             else:
                                 await asyncio.sleep(0.7)
                         if not rain:
@@ -315,7 +315,7 @@ class RainCollector:
                     for i in range(0, 4, 1):
                         rain_joined = self.current_detections.get("rain_joined", None)
                         if rain_joined:
-                            break
+                            pass
                         else:
                             await asyncio.sleep(0.7)
                     if rain_joined:
@@ -331,7 +331,6 @@ class RainCollector:
                 # Если все окна получили рейн, выходим из цикла рейна
                 if all(window.rain_connected for window in self.windows):
                     await plogging.info("Все окна успешно присоединились к рейну.")
-                    break
 
             # Рейн закончился – сбрасываем флаги и ждём 20 минут до следующего рейна
             self.rain_now = False
