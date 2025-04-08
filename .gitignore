@@ -1,3 +1,4 @@
 logs/
 __pycache__/
 start.bat
+resources/test.py

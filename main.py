@@ -86,7 +86,7 @@ class RainCollector:
         self.start_rain_time = None
         self.yolo = Yolo
         self.current_detections = {}
-        self.confidence_threshold = 0.85
+        self.confidence_threshold = 0.7
         self.rain_now = False
         self.current_window = None
         
