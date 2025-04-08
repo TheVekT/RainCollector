@@ -236,112 +236,132 @@ class RainCollector:
                         return True
     
     async def run(self):
+        # Проверка наличия доступных окон
         if not self.windows:
-            await plogging.error("Нет доступных окон для работы.")
+            await plogging.error("Ошибка [init-001]: Нет доступных окон для работы.")
             raise ValueError("Нет доступных окон для работы.")
-        # Запускаем фоновые задачи (обновление детекций, обновление страницы и проверку окон на зависание)
-        #self.update_detections.start()
-        #self.ref_page.start()
-        #self.check_bug_window.start()
 
-        # Начинаем с первого окна
+        # Запускаем фоновые задачи (закомментировано, но можно активировать при необходимости)
+        # self.update_detections.start()
+        # self.ref_page.start()
+        # self.check_bug_window.start()
+
+        # Инициализируем первое окно
         self.current_window = self.windows[0]
+        await plogging.info("Старт [init-002]: Первое окно выбрано для начала работы.")
 
         while True:
             # Фокусируем текущее окно
             await self.current_window.focus_window()
+            await plogging.info(f"Фокус окна [cycle-001]: Окно {self.current_window.name} получило фокус.")
 
-            # Ждем, пока в текущем окне не появится хоть один из объектов: join_rain или rain_joined.
+            # Ждём появления хотя бы одного из объектов: join_rain или rain_joined.
             rain = self.current_detections.get("join_rain", None)
             joined = self.current_detections.get("rain_joined", None)
             while rain is None and joined is None:
                 await asyncio.sleep(0.7)
                 rain = self.current_detections.get("join_rain", None)
                 joined = self.current_detections.get("rain_joined", None)
+                await plogging.info("Ожидание [detect-001]: Проверяем наличие 'join_rain' или 'rain_joined' в текущем окне.")
 
-            # Как только обнаружили хотя бы один из объектов, фиксируем время начала рейна (если еще не зафиксировано)
+            # Фиксируем время начала рейна (если ещё не зафиксировано)
             if self.rain_start_time is None:
                 self.rain_start_time = time.time()
+                await plogging.info("Таймстамп [time-001]: Фиксируем время начала рейна.")
 
-            # Пока прошло менее 3 минут с начала рейна (режим сбора рейна)
+            # Режим сбора рейна в течение 3 минут
             while time.time() - self.rain_start_time < 180:
                 self.rain_now = True
-                await plogging.info("Рейн обнаружен. Обрабатываем окна.")
+                await plogging.info("Обработка [rain-001]: Рейн обнаружен, начинаем обработку окон.")
 
-                # Перебираем окна последовательно
+                # Проходим по всем окнам для попытки присоединения к рейну
                 for window in self.windows:
-                    self.current_detections = {}
+                    await plogging.info(f"Обработка окон [loop-001]: Переключаемся на окно {window.name}.")
+                    self.current_detections = {}  # Сброс детекций для нового окна
                     self.current_window = window
                     await window.focus_window()
-                    # Обновляем данные из глобального кэша для текущего окна
-                    for i in range(0, 4, 1):
+                    await plogging.info(f"Фокус окна [loop-002]: Фокус установлен для окна {window.name}.")
+
+                    # Обновляем данные глобального кэша для текущего окна с повторными попытками
+                    for i in range(4):
                         rain = self.current_detections.get("join_rain", None)
                         rain_joined = self.current_detections.get("rain_joined", None)
                         if rain or rain_joined:
-                            pass
+                            await plogging.info(f"Проверка кэша [cache-001]: В окне {window.name} обнаружено событие: {'rain_joined' if rain_joined else 'join_rain'}.")
+                            break
                         else:
                             await asyncio.sleep(0.7)
-                    # Если окно уже получило рейн, помечаем его и переходим к следующему
+                            await plogging.info(f"Ожидание кэша [cache-002]: Нет данных в окне {window.name}, повторная проверка ({i+1}/4).")
+
+                    # Если окно уже присоединилось к рейну, пропускаем его
                     if rain_joined:
-                        await plogging.info(f"Окно {window.name} уже присоединилось к рейну.")
+                        await plogging.info(f"Пропуск окна [skip-001]: Окно {window.name} уже получило рейн (rain_joined обнаружен).")
                         window.rain_connected = True
                         continue
 
-                    # Если объекта join_rain нет (хотя по логике рейн должен идти), пытаемся обновить страницу и получить его
+                    # Если объект join_rain не найден – пробуем обновить страницу
                     if not rain:
-                        await plogging.error(f"Не удалось найти рейн в окне {window.name} хотя рейн идет.")
+                        await plogging.error(f"Ошибка [refresh-001]: В окне {window.name} не найден join_rain, хотя рейн идет. Пытаемся обновить страницу.")
                         await window.refresh_page()
-                        for i in range(0, 4, 1):
+                        for i in range(4):
                             rain = self.current_detections.get("join_rain", None)
                             if rain:
-                                pass
+                                await plogging.info(f"Обновление кэша [refresh-002]: join_rain обнаружен в окне {window.name} после обновления (попытка {i+1}/4).")
+                                break
                             else:
                                 await asyncio.sleep(0.7)
+                                await plogging.info(f"Ожидание после обновления [refresh-003]: Нет join_rain в окне {window.name}, повторная проверка ({i+1}/4).")
                         if not rain:
-                            await plogging.error(f"Не удалось найти рейн в окне {window.name} даже после обновления.")
+                            await plogging.error(f"Ошибка [refresh-004]: join_rain так и не найден в окне {window.name} после обновления страницы.")
                             continue
                         else:
                             await self.rain_collect(rain)
-                        continue
+                            await plogging.info(f"Присоединение [collect-001]: В окне {window.name} выполнено присоединение рейна после обновления.")
+                            continue
 
                     # Если обнаружен объект join_rain – пробуем принять рейн
                     await self.rain_collect(rain)
+                    await plogging.info(f"Присоединение [collect-002]: Запущено присоединение рейна в окне {window.name} по объекту join_rain.")
 
-                # Выполняем валидацию: проходим по всем окнам и проверяем, все ли получило рейн
-                await plogging.info("Проводим валидацию: проверяем, все ли окна получили рейн.")
+                # Валидация: Проверяем, получили ли все окна рейн
+                await plogging.info("Валидация [validate-001]: Начало проверки окон на получение рейна.")
                 for window in self.windows:
                     self.current_window = window
                     await window.focus_window()
-                    for i in range(0, 4, 1):
+                    await plogging.info(f"Валидация [validate-002]: Фокус установлен для проверки окна {window.name}.")
+                    for i in range(4):
                         rain_joined = self.current_detections.get("rain_joined", None)
                         if rain_joined:
-                            pass
+                            await plogging.info(f"Валидация [validate-003]: Обнаружен rain_joined в окне {window.name} (попытка {i+1}/4).")
+                            break
                         else:
                             await asyncio.sleep(0.7)
+                            await plogging.info(f"Валидация ожидания [validate-004]: Нет rain_joined в окне {window.name}, повторная проверка ({i+1}/4).")
                     if rain_joined:
-                        await plogging.info(f"При валидации, окно {window.name} получило рейн.")
+                        await plogging.info(f"Валидация [validate-005]: Окно {window.name} успешно получило рейн.")
                         window.rain_connected = True
                         continue
                     elif self.current_detections.get("join_rain", None):
-                        await plogging.info(f"При валидации, окно {window.name} не получило рейн. Пробуем присоединить.")
+                        await plogging.info(f"Валидация [validate-006]: Окно {window.name} не получило рейн, пробуем повторное присоединение.")
                         window.rain_connected = False
                         await self.rain_collect(self.current_detections.get("join_rain", None))
                         continue
 
-                # Если все окна получили рейн, выходим из цикла рейна
+                # Если все окна получили рейн, завершаем цикл сбора рейна
                 if all(window.rain_connected for window in self.windows):
-                    await plogging.info("Все окна успешно присоединились к рейну.")
+                    await plogging.info("Завершение цикла [cycle-002]: Все окна получили рейн в текущем цикле.")
 
-            # Рейн закончился – сбрасываем флаги и ждём 20 минут до следующего рейна
+            # По истечении 3 минут режима рейна: сбрасываем флаги и начинаем ожидание до следующего рейна
             self.rain_now = False
-            await plogging.info("Рейн закончился. Сбрасываем статус окон.")
+            await plogging.info("Завершение рейна [end-001]: Рейн закончен, сбрасываем состояние окон.")
             for window in self.windows:
                 window.rain_connected = False
-            await plogging.info("Ожидаем 20 минут до следующего рейна.")
+                await plogging.info(f"Сброс состояния [end-002]: Сброшено состояние для окна {window.name}.")
+            await plogging.info("Ожидание [wait-001]: Начинается 20-минутное ожидание до следующего рейна.")
             await asyncio.sleep(20 * 60)
-            await plogging.info("20 минут ожидания завершены. Начинаем новый цикл.")
+            await plogging.info("Ожидание завершено [wait-002]: 20 минут прошли, начинаем новый цикл.")
             self.rain_start_time = None
-                
+                    
                         
                 
                 
