@@ -44,6 +44,7 @@ class AccountWindow:
                 # Проверим: действительно ли окно теперь активно
                 if self.window.isActive:
                     await plogging.info("Окно успешно активировано и находится в фокусе.")
+                    await asyncio.sleep(0.2)
                     return True
                 else:
                     await plogging.warn("Окно не получило фокус после попытки activate(). Переходим к резервному варианту.")
@@ -51,7 +52,7 @@ class AccountWindow:
                 await plogging.warn(f"Ошибка при попытке activate(): {activate_error}")
         except Exception as e:
             await plogging.error(f"Ошибка при установке фокуса: {e}")
-        
+        await asyncio.sleep(0.2)
         return False
     
     async def refresh_page(self):
@@ -149,7 +150,7 @@ class RainCollector:
         """
         pyautogui.moveTo(x, y, duration=0.3, tween=pyautogui.easeInOutQuad)
         pyautogui.click()
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
     
     async def check_rain_joined(self):
         async def _check_rain_joined_loop():
@@ -190,52 +191,58 @@ class RainCollector:
             self.current_window.rain_connected = True
             return True
     
-    @loop(seconds=0.7)
+    #@loop(seconds=0.7)
     async def update_detections(self):
-        if not self.current_window:
-            self.windows[0].focus_window()
-            self.current_window = self.windows[0]
-        print(self.current_detections)
-        self.current_detections = await self.detect_objects()
+        while True:
+            await asyncio.sleep(0.7)
+            if not self.current_window:
+                self.windows[0].focus_window()
+                self.current_window = self.windows[0]
+            print(self.current_detections)
+            self.current_detections = await self.detect_objects()
         
-    @loop(seconds=900)
+    #@loop(seconds=900)
     async def ref_page(self):
-        if self.current_window and not self.rain_now:
-            await self.current_window.refresh_page()
-        else:
-            await plogging.error("Нет активного окна для обновления страницы.")
-    
-    @loop(seconds=900)       
-    async def check_bug_window(self):
-        bugged = self.current_detections.get("bandit_loading", None)
-        if bugged:
-            await asyncio.sleep(3)
-            if self.current_detections.get("bandit_loading", None):
-                await plogging.info(f"Обнаружено, что окно {self.current_window.name} зависло. Пробуем обновить страницу.")
+        while True:
+            await asyncio.sleep(900)
+            if self.current_window and not self.rain_now:
                 await self.current_window.refresh_page()
+            else:
+                await plogging.error("Нет активного окна для обновления страницы.")
+        
+    #@loop(seconds=900)       
+    async def check_bug_window(self):
+        while True:
+            await asyncio.sleep(900)
+            bugged = self.current_detections.get("bandit_loading", None)
+            if bugged:
+                await asyncio.sleep(3)
                 if self.current_detections.get("bandit_loading", None):
-                    await plogging.error(f"Не удалось обновить страницу в окне {self.current_window.name} с первого раза.")
-                    await asyncio.sleep(3)
+                    await plogging.info(f"Обнаружено, что окно {self.current_window.name} зависло. Пробуем обновить страницу.")
                     await self.current_window.refresh_page()
                     if self.current_detections.get("bandit_loading", None):
-                        await plogging.error(f"Не удалось обновить страницу в окне {self.current_window.name} со второго раза. Помечаем окно как зависшее.")
-                        self.windows.remove(self.current_window)
-                        self.current_window = self.windows[0]
-                        return False
+                        await plogging.error(f"Не удалось обновить страницу в окне {self.current_window.name} с первого раза.")
+                        await asyncio.sleep(3)
+                        await self.current_window.refresh_page()
+                        if self.current_detections.get("bandit_loading", None):
+                            await plogging.error(f"Не удалось обновить страницу в окне {self.current_window.name} со второго раза. Помечаем окно как зависшее.")
+                            self.windows.remove(self.current_window)
+                            self.current_window = self.windows[0]
+                            return False
+                        else:
+                            await plogging.info(f"Страница в окне {self.current_window.name} обновлена успешно.")
+                            return True
                     else:
-                        await plogging.info(f"Страница в окне {self.current_window.name} обновлена успешно.")
                         return True
-                else:
-                    return True
     
     async def run(self):
         if not self.windows:
             await plogging.error("Нет доступных окон для работы.")
             raise ValueError("Нет доступных окон для работы.")
         # Запускаем фоновые задачи (обновление детекций, обновление страницы и проверку окон на зависание)
-        self.update_detections.start()
-        self.ref_page.start()
-        self.check_bug_window.start()
+        #self.update_detections.start()
+        #self.ref_page.start()
+        #self.check_bug_window.start()
 
         # Начинаем с первого окна
         self.current_window = self.windows[0]
@@ -263,6 +270,7 @@ class RainCollector:
 
                 # Перебираем окна последовательно
                 for window in self.windows:
+                    self.current_detections = {}
                     self.current_window = window
                     await window.focus_window()
                     # Обновляем данные из глобального кэша для текущего окна
@@ -403,7 +411,11 @@ async def main():
     yolo_model = YOLO("best.pt")
     collector = RainCollector(Yolo=yolo_model)
     await collector.update_windows()
-    await collector.run()
+    asyncio.create_task(collector.check_bug_window())
+    asyncio.create_task(collector.update_detections())
+    asyncio.create_task(collector.ref_page())
+    asyncio.create_task(collector.run())
+    await asyncio.Event().wait()
     
 
 
