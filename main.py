@@ -89,6 +89,7 @@ class RainCollector:
         self.confidence_threshold = 0.7
         self.rain_now = False
         self.current_window = None
+        self.rain_start_time = None
         
     async def update_windows(self):
         windows: list[AccountWindow] = []
