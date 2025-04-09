@@ -167,7 +167,7 @@ class RainCollector:
                 join_rain = self.current_detections.get("join_rain", None)
                 if rain_joined:
                     await plogging.info(f"[rain_joined-001] Окно {self.current_window.name} успешно присоединилось к рейну (rain_joined обнаружен).")
-                    break
+                    return True
                 elif join_rain:
                     await plogging.info(f"[rain_joined-002] Окно {self.current_window.name} еще не присоединилось к рейну (обнаружен join_rain).")
                     return False
@@ -175,9 +175,9 @@ class RainCollector:
                     await plogging.info(f"[rain_joined-003] В окне {self.current_window.name} отсутствуют как join_rain, так и rain_joined. Ожидание 1 сек.")
                     await asyncio.sleep(1)
         try:
-            await asyncio.wait_for(_check_rain_joined_loop(), timeout=5)
+            result = await asyncio.wait_for(_check_rain_joined_loop(), timeout=5)
             await plogging.info(f"[rain_joined-004] Завершение проверки рейна в окне {self.current_window.name}.")
-            return True
+            return result
         except asyncio.TimeoutError:
             await plogging.error(f"[rain_joined-005] Не удалось проверить присоединение к рейну в окне {self.current_window.name} (таймаут).")
             return False
@@ -185,11 +185,10 @@ class RainCollector:
     async def rain_collect(self, coords):
         await plogging.info(f"[rain_collect-001] Начало процедуры сбора рейна в окне {self.current_window.name}.")
         connected = await self.check_rain_joined()
-        if connected == False:
+        if connected == True:
             await plogging.info(f"[rain_collect-002] Окно {self.current_window.name} уже получило рейн. Выход из процедуры.")
             self.current_window.rain_connected = True
             return True
-
         x_coord = coords[0] + coords[2] // 2
         y_coord = coords[1] + coords[3] // 2
         await plogging.info(f"[rain_collect-003] Выполняем первичный клик по центру join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
