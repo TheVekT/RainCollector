@@ -136,7 +136,7 @@ class RainCollector:
                     y_coord = confirm_cloudflare[1] + confirm_cloudflare[3] // 2
                     await plogging.info(f"[cloudflare-002] В окне {self.current_window.name} найден confirm_cloudflare. Выполняем клик по координатам: {x_coord}:{y_coord}.")
                     await self.click(x_coord, y_coord)
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(1)
                     break
                 else:
                     await plogging.info(f"[cloudflare-003] Cloudflare в окне {self.current_window.name} завершился или не обнаружен. Выход из цикла ожидания.")
@@ -185,47 +185,48 @@ class RainCollector:
     async def rain_collect(self, coords):
         await plogging.info(f"[rain_collect-001] Начало процедуры сбора рейна в окне {self.current_window.name}.")
         connected = await self.check_rain_joined()
+        await plogging.info(f"[rain_collect-002] Статус присоедененности {connected}, поданные кординаты обькта рейна {coords}")
         if connected == True:
-            await plogging.info(f"[rain_collect-002] Окно {self.current_window.name} уже получило рейн. Выход из процедуры.")
+            await plogging.info(f"[rain_collect-003] Окно {self.current_window.name} уже получило рейн. Выход из процедуры.")
             self.current_window.rain_connected = True
             return True
         x_coord = coords[0] + coords[2] // 2
         y_coord = coords[1] + coords[3] // 2
-        await plogging.info(f"[rain_collect-003] Выполняем первичный клик по центру join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
+        await plogging.info(f"[rain_collect-004] Выполняем первичный клик по центру join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
         await self.click(x_coord, y_coord)
         await asyncio.sleep(2)
-        await plogging.info(f"[rain_collect-004] Ждём Cloudflare после первичного клика в окне {self.current_window.name}.")
+        await plogging.info(f"[rain_collect-005] Ждём Cloudflare после первичного клика в окне {self.current_window.name}.")
         await self.wait_cloudflare()
         await asyncio.sleep(1)
         connected = await self.check_rain_joined() 
         if connected == False:
-            await plogging.info(f"[rain_collect-005] Рейн не подтвержден в окне {self.current_window.name} после первого клика. Обновляем страницу.")
+            await plogging.info(f"[rain_collect-006] Рейн не подтвержден в окне {self.current_window.name} после первого клика. Обновляем страницу.")
             await self.current_window.refresh_page()
             for i in range(3):
                 rain = self.current_detections.get("join_rain", None)
                 if rain:
-                    await plogging.info(f"[rain_collect-006] Найден join_rain после обновления страницы в окне {self.current_window.name} (попытка {i+1}/3).")
+                    await plogging.info(f"[rain_collect-007] Найден join_rain после обновления страницы в окне {self.current_window.name} (попытка {i+1}/3).")
                     break
                 else:
                     await asyncio.sleep(0.7)
-                    await plogging.info(f"[rain_collect-007] Нет join_rain в окне {self.current_window.name} после обновления, ожидание 0.7 сек (попытка {i+1}/3).")
+                    await plogging.info(f"[rain_collect-008] Нет join_rain в окне {self.current_window.name} после обновления, ожидание 0.7 сек (попытка {i+1}/3).")
             if rain:
                 x_coord = rain[0] + rain[2] // 2
                 y_coord = rain[1] + rain[3] // 2
-                await plogging.info(f"[rain_collect-008] Выполняем повторный клик по join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
+                await plogging.info(f"[rain_collect-009] Выполняем повторный клик по join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
                 await self.click(x_coord, y_coord)
                 await asyncio.sleep(2)
-                await plogging.info(f"[rain_collect-009] Ждём Cloudflare после повторного клика в окне {self.current_window.name}.")
+                await plogging.info(f"[rain_collect-010] Ждём Cloudflare после повторного клика в окне {self.current_window.name}.")
                 await self.wait_cloudflare()
                 await asyncio.sleep(1)
                 if not await self.check_rain_joined():
-                    await plogging.error(f"[rain_collect-010] Окно {self.current_window.name} так и не подтвердило получение рейна после повторного клика.")
+                    await plogging.error(f"[rain_collect-011] Окно {self.current_window.name} так и не подтвердило получение рейна после повторного клика.")
                     return False
             else:
-                await plogging.error(f"[rain_collect-011] join_rain не найдено в окне {self.current_window.name} после обновления страницы.")
+                await plogging.error(f"[rain_collect-012] join_rain не найдено в окне {self.current_window.name} после обновления страницы.")
                 return False
         else:
-            await plogging.info(f"[rain_collect-012] Окно {self.current_window.name} успешно подтвердило получение рейна после первичного клика.")
+            await plogging.info(f"[rain_collect-013] Окно {self.current_window.name} успешно подтвердило получение рейна после первичного клика.")
             self.current_window.rain_connected = True
             return True
     
