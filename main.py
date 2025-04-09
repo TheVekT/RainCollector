@@ -191,8 +191,12 @@ class RainCollector:
             self.current_window.rain_connected = True
             return True
         await plogging.info(f"[rain_collect-math-001] Пытаемся высщитать координаты клика.")
-        x_coord = coords[0] + coords[2] // 2
-        y_coord = coords[1] + coords[3] // 2
+        try:
+            x_coord = coords[0] + coords[2] // 2
+            y_coord = coords[1] + coords[3] // 2
+        except Exception as e:
+            await plogging.error(f"[rain_collect-error] Ошибка вычисления координат: {e}. coords: {coords}")
+            return False
         await plogging.info(f"[rain_collect-004] Выполняем первичный клик по центру join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
         await self.click(x_coord, y_coord)
         await asyncio.sleep(2)
