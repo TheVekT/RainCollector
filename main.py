@@ -89,7 +89,8 @@ class RainCollector:
         self.windows = windows
 
     async def capture_screenshot(self, grayscale: bool = False):
-        await self.current_window.focus_window()  # Если нужно, оставьте фокус на окне
+        if not self.current_window.window.isActive:
+            await self.current_window.focus_window()  # Если нужно, оставьте фокус на окне
         image = pyautogui.screenshot()  # Скриншот всего монитора
         frame = np.array(image)
 
@@ -126,20 +127,26 @@ class RainCollector:
                 cloudflare_loading = self.current_detections.get("cloudflare_loading", None)
                 confirm_cloudflare = self.current_detections.get("confirm_cloudflare", None)
                 if cloudflare_loading:
+                    await plogging.info(f"[cloudflare-001] В окне {self.current_window.name} найден индикатор загрузки Cloudflare. Ожидание 0.7 сек.")
                     await asyncio.sleep(0.7)
                     continue
                 elif confirm_cloudflare:
-                    await self.click(confirm_cloudflare[0]+confirm_cloudflare[2]//2, confirm_cloudflare[1]+confirm_cloudflare[3]//2)
+                    # Вычисляем координаты центра кнопки подтверждения
+                    x_coord = confirm_cloudflare[0] + confirm_cloudflare[2] // 2
+                    y_coord = confirm_cloudflare[1] + confirm_cloudflare[3] // 2
+                    await plogging.info(f"[cloudflare-002] В окне {self.current_window.name} найден confirm_cloudflare. Выполняем клик по координатам: {x_coord}:{y_coord}.")
+                    await self.click(x_coord, y_coord)
                     await asyncio.sleep(0.5)
                     break
                 else:
-                    await plogging.info(f"Cloudflare в окне {self.current_window.name} закончился или не обнаружен.")
+                    await plogging.info(f"[cloudflare-003] Cloudflare в окне {self.current_window.name} завершился или не обнаружен. Выход из цикла ожидания.")
                     break
         try:
             await asyncio.wait_for(_wait_cloudflare_loop(), timeout=10)
+            await plogging.info(f"[cloudflare-004] Завершение wait_cloudflare в окне {self.current_window.name}.")
             return True
         except asyncio.TimeoutError:
-            await plogging.error(f"Cloudflare в окне {self.current_window.name} не завершился вовремя.")
+            await plogging.error(f"[cloudflare-005] Cloudflare в окне {self.current_window.name} не завершился вовремя (таймаут).")
             return False
     
         
@@ -147,9 +154,11 @@ class RainCollector:
         """
         Кликает по координатам (x, y) на экране.
         """
+        await plogging.info(f"[click-001] Выполняется клик по координатам: {x}:{y} в окне {self.current_window.name}.")
         pyautogui.moveTo(x, y, duration=0.3, tween=pyautogui.easeInOutQuad)
         pyautogui.click()
         await asyncio.sleep(0.3)
+        await plogging.info(f"[click-002] Завершён клик в окне {self.current_window.name}.")
     
     async def check_rain_joined(self):
         async def _check_rain_joined_loop():
@@ -157,40 +166,70 @@ class RainCollector:
                 rain_joined = self.current_detections.get("rain_joined", None)
                 join_rain = self.current_detections.get("join_rain", None)
                 if rain_joined:
-                    await plogging.info(f"Окно {self.current_window.name} присоединилось к рейну.")
+                    await plogging.info(f"[rain_joined-001] Окно {self.current_window.name} успешно присоединилось к рейну (rain_joined обнаружен).")
                     break
                 elif join_rain:
-                    await plogging.info(f"Окно {self.current_window.name} еще не присоеденено к рейну.")
+                    await plogging.info(f"[rain_joined-002] Окно {self.current_window.name} еще не присоединилось к рейну (обнаружен join_rain).")
                     return False
                 else:
+                    await plogging.info(f"[rain_joined-003] В окне {self.current_window.name} отсутствуют как join_rain, так и rain_joined. Ожидание 1 сек.")
                     await asyncio.sleep(1)
         try:
             await asyncio.wait_for(_check_rain_joined_loop(), timeout=5)
+            await plogging.info(f"[rain_joined-004] Завершение проверки рейна в окне {self.current_window.name}.")
             return True
         except asyncio.TimeoutError:
-            await plogging.error(f"Не удалось проверить присоединиться ли к рейну в окне {self.current_window.name}")
+            await plogging.error(f"[rain_joined-005] Не удалось проверить присоединение к рейну в окне {self.current_window.name} (таймаут).")
             return False
     
     async def rain_collect(self, coords):
-        if await self.check_rain_joined() == False:
-            await plogging.info(f"Окно {self.current_window.name} уже присоеденено к рейну.")
+        await plogging.info(f"[rain_collect-001] Начало процедуры сбора рейна в окне {self.current_window.name}.")
+        connected = await self.check_rain_joined()
+        if connected == False:
+            await plogging.info(f"[rain_collect-002] Окно {self.current_window.name} уже получило рейн. Выход из процедуры.")
             self.current_window.rain_connected = True
             return True
-        await self.click(coords[0]+coords[2]//2, coords[1]+coords[3]//2)
+
+        x_coord = coords[0] + coords[2] // 2
+        y_coord = coords[1] + coords[3] // 2
+        await plogging.info(f"[rain_collect-003] Выполняем первичный клик по центру join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
+        await self.click(x_coord, y_coord)
+        await asyncio.sleep(2)
+        await plogging.info(f"[rain_collect-004] Ждём Cloudflare после первичного клика в окне {self.current_window.name}.")
         await self.wait_cloudflare()
-        if await self.check_rain_joined() == False:
+        await asyncio.sleep(1)
+        connected = await self.check_rain_joined() 
+        if connected == False:
+            await plogging.info(f"[rain_collect-005] Рейн не подтвержден в окне {self.current_window.name} после первого клика. Обновляем страницу.")
             await self.current_window.refresh_page()
-            rain = self.current_detections.get("join_rain", None)
+            for i in range(3):
+                rain = self.current_detections.get("join_rain", None)
+                if rain:
+                    await plogging.info(f"[rain_collect-006] Найден join_rain после обновления страницы в окне {self.current_window.name} (попытка {i+1}/3).")
+                    break
+                else:
+                    await asyncio.sleep(0.7)
+                    await plogging.info(f"[rain_collect-007] Нет join_rain в окне {self.current_window.name} после обновления, ожидание 0.7 сек (попытка {i+1}/3).")
             if rain:
-                await self.click(rain[0]+rain[2]//2, rain[1]+rain[3]//2)
+                x_coord = rain[0] + rain[2] // 2
+                y_coord = rain[1] + rain[3] // 2
+                await plogging.info(f"[rain_collect-008] Выполняем повторный клик по join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
+                await self.click(x_coord, y_coord)
+                await asyncio.sleep(2)
+                await plogging.info(f"[rain_collect-009] Ждём Cloudflare после повторного клика в окне {self.current_window.name}.")
                 await self.wait_cloudflare()
+                await asyncio.sleep(1)
                 if not await self.check_rain_joined():
+                    await plogging.error(f"[rain_collect-010] Окно {self.current_window.name} так и не подтвердило получение рейна после повторного клика.")
                     return False
+            else:
+                await plogging.error(f"[rain_collect-011] join_rain не найдено в окне {self.current_window.name} после обновления страницы.")
+                return False
         else:
+            await plogging.info(f"[rain_collect-012] Окно {self.current_window.name} успешно подтвердило получение рейна после первичного клика.")
             self.current_window.rain_connected = True
             return True
     
-    #@loop(seconds=0.7)
     async def update_detections(self):
         while True:
             await asyncio.sleep(0.7)
@@ -200,7 +239,6 @@ class RainCollector:
             print(self.current_detections)
             self.current_detections = await self.detect_objects()
         
-    #@loop(seconds=900)
     async def ref_page(self):
         while True:
             await asyncio.sleep(900)
@@ -208,30 +246,35 @@ class RainCollector:
                 await self.current_window.refresh_page()
             else:
                 await plogging.error("Нет активного окна для обновления страницы.")
-        
-    #@loop(seconds=900)       
+            
     async def check_bug_window(self):
         while True:
             await asyncio.sleep(900)
             bugged = self.current_detections.get("bandit_loading", None)
             if bugged:
+                await plogging.info(f"[bug-001] Окно {self.current_window.name} обнаружило 'bandit_loading'. Ожидание 3 сек для повторной проверки.")
                 await asyncio.sleep(3)
                 if self.current_detections.get("bandit_loading", None):
-                    await plogging.info(f"Обнаружено, что окно {self.current_window.name} зависло. Пробуем обновить страницу.")
+                    await plogging.info(f"[bug-002] Окно {self.current_window.name} до сих пор в состоянии 'bandit_loading'. Попытка обновления страницы (1-я попытка).")
                     await self.current_window.refresh_page()
                     if self.current_detections.get("bandit_loading", None):
-                        await plogging.error(f"Не удалось обновить страницу в окне {self.current_window.name} с первого раза.")
+                        await plogging.error(f"[bug-003] Первичная попытка обновления страницы не удалась в окне {self.current_window.name}. Ожидание 3 сек и повторная попытка.")
                         await asyncio.sleep(3)
                         await self.current_window.refresh_page()
                         if self.current_detections.get("bandit_loading", None):
-                            await plogging.error(f"Не удалось обновить страницу в окне {self.current_window.name} со второго раза. Помечаем окно как зависшее.")
+                            await plogging.error(f"[bug-004] Окно {self.current_window.name} так и не восстановилось после двух попыток обновления. Помечаем окно как зависшее и удаляем его из списка.")
                             self.windows.remove(self.current_window)
-                            self.current_window = self.windows[0]
+                            if self.windows:
+                                self.current_window = self.windows[0]
+                                await plogging.info(f"[bug-005] Переключаемся на окно {self.current_window.name} как новое активное окно.")
+                            else:
+                                await plogging.error("[bug-006] Нет доступных окон после удаления зависшего. Завершение проверки.")
                             return False
                         else:
-                            await plogging.info(f"Страница в окне {self.current_window.name} обновлена успешно.")
+                            await plogging.info(f"[bug-007] Окно {self.current_window.name} успешно восстановилось после второй попытки обновления.")
                             return True
                     else:
+                        await plogging.info(f"[bug-008] Окно {self.current_window.name} восстановилось после первой попытки обновления.")
                         return True
     
     async def run(self):
@@ -240,10 +283,6 @@ class RainCollector:
             await plogging.error("Ошибка [init-001]: Нет доступных окон для работы.")
             raise ValueError("Нет доступных окон для работы.")
 
-        # Запускаем фоновые задачи (закомментировано, но можно активировать при необходимости)
-        # self.update_detections.start()
-        # self.ref_page.start()
-        # self.check_bug_window.start()
 
         # Инициализируем первое окно
         self.current_window = self.windows[0]
