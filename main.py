@@ -329,7 +329,7 @@ class RainCollector:
                     await plogging.info(f"Фокус окна [loop-002]: Фокус установлен для окна {window.name}.")
 
                     # Обновляем данные глобального кэша для текущего окна с повторными попытками
-                    for i in range(4):
+                    for i in range(5):
                         rain = self.current_detections.get("join_rain", None)
                         rain_joined = self.current_detections.get("rain_joined", None)
                         if rain or rain_joined:
@@ -349,7 +349,7 @@ class RainCollector:
                     if not rain:
                         await plogging.error(f"Ошибка [refresh-001]: В окне {window.name} не найден join_rain, хотя рейн идет. Пытаемся обновить страницу.")
                         await window.refresh_page()
-                        for i in range(4):
+                        for i in range(5):
                             rain = self.current_detections.get("join_rain", None)
                             if rain:
                                 await plogging.info(f"Обновление кэша [refresh-002]: join_rain обнаружен в окне {window.name} после обновления (попытка {i+1}/4).")
@@ -378,7 +378,7 @@ class RainCollector:
                 for window in self.windows:
                     self.current_window = window
                     await window.focus_window()
-                    await self.ref_page()
+                    await self.current_window.refresh_page()
                     await plogging.info(f"Валидация [validate-002]: Фокус установлен для проверки окна {window.name}.")
                     await asyncio.sleep(3)
                     result = await self.check_rain_joined()
@@ -387,7 +387,7 @@ class RainCollector:
                         window.rain_connected = True
                         continue
                     else:
-                        for i in range(4):
+                        for i in range(5):
                             rain = self.current_detections.get("join_rain", None)
                             rain_joined = self.current_detections.get("rain_joined", None)
                             if rain or rain_joined:
