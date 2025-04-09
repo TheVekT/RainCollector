@@ -378,6 +378,14 @@ class RainCollector:
                 for window in self.windows:
                     self.current_window = window
                     await window.focus_window()
+                    for i in range(4):
+                        rain_joined = self.current_detections.get("rain_joined", None)
+                        if rain or rain_joined:
+                            break
+                        else:
+                            await asyncio.sleep(1)
+                    if rain_joined:
+                        continue
                     await self.current_window.refresh_page()
                     await plogging.info(f"Валидация [validate-002]: Фокус установлен для проверки окна {window.name}.")
                     await asyncio.sleep(3)
