@@ -308,6 +308,11 @@ class RainCollector:
                 await asyncio.sleep(1)
                 rain = self.current_detections.get("join_rain", None)
                 joined = self.current_detections.get("rain_joined", None)
+                if rain:
+                    await asyncio.sleep(1)
+                    rain = self.current_detections.get("join_rain", None)
+                    if rain:
+                        break
             
             # Фиксируем время начала рейна (если ещё не зафиксировано)
             if self.rain_start_time is None:
