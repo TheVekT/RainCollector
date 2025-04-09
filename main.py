@@ -306,7 +306,7 @@ class RainCollector:
                 await asyncio.sleep(1)
                 rain = self.current_detections.get("join_rain", None)
                 joined = self.current_detections.get("rain_joined", None)
-
+            
             # Фиксируем время начала рейна (если ещё не зафиксировано)
             if self.rain_start_time is None:
                 self.rain_start_time = time.time()
@@ -448,35 +448,31 @@ class RainCollector:
             results = self.yolo(frame)  # вызов модели
             # Инициализируем словарь для результатов
             detection_dict = {}
-            
-            # Обрабатываем все результаты (предполагается, что results - список объектов Result)
-            # Каждый result имеет атрибуты .boxes и .names
+
             for result in results:
-                # Получаем boxes (объекты обнаружений)
                 boxes = result.boxes
-                # Обходим каждое обнаружение
                 for box in boxes:
-                    # Получаем confidence и class id
                     confidence = float(box.conf[0])
                     class_id = int(box.cls[0])
-                    
+
                     if confidence > self.confidence_threshold:
-                        # box.xyxy содержит координаты [x1, y1, x2, y2]
                         x1, y1, x2, y2 = box.xyxy[0].tolist()
                         x = int(x1)
                         y = int(y1)
                         width = int(x2 - x1)
                         height = int(y2 - y1)
                         
-                        # Получаем название объекта (для YOLOv8 Ultralytics, модель хранит классы в self.yolo.names)
-                        # Убедитесь, что self.yolo.names определены. Если нет, задайте их вручную.
                         label = self.yolo.names[class_id] if hasattr(self.yolo, 'names') else str(class_id)
-                        
-                        # Добавляем детекцию в словарь
-                        if label in detection_dict:
-                            detection_dict[label].append((x, y, width, height))
+                        coords = (x, y, width, height)
+
+                        if label not in detection_dict:
+                            detection_dict[label] = coords  # просто кортеж
                         else:
-                            detection_dict[label] = [(x, y, width, height)]
+                            # если уже есть кортеж — преобразуем в список
+                            if isinstance(detection_dict[label], tuple):
+                                detection_dict[label] = [detection_dict[label], coords]
+                            else:
+                                detection_dict[label].append(coords)
             
             return detection_dict
 
