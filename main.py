@@ -190,6 +190,7 @@ class RainCollector:
             await plogging.info(f"[rain_collect-003] Окно {self.current_window.name} уже получило рейн. Выход из процедуры.")
             self.current_window.rain_connected = True
             return True
+        await plogging.info(f"[rain_collect-math-001] Пытаемся высщитать координаты клика.")
         x_coord = coords[0] + coords[2] // 2
         y_coord = coords[1] + coords[3] // 2
         await plogging.info(f"[rain_collect-004] Выполняем первичный клик по центру join_rain: {x_coord}:{y_coord} в окне {self.current_window.name}.")
