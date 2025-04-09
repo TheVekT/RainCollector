@@ -1,4 +1,5 @@
 import asyncio
+import asyncio.selector_events
 import time
 import pyautogui
 import cv2
@@ -123,6 +124,7 @@ class RainCollector:
         
     async def wait_cloudflare(self):
         async def _wait_cloudflare_loop():
+            await asyncio.sleep(2)
             while True:
                 cloudflare_loading = self.current_detections.get("cloudflare_loading", None)
                 confirm_cloudflare = self.current_detections.get("confirm_cloudflare", None)
@@ -376,6 +378,7 @@ class RainCollector:
                 for window in self.windows:
                     self.current_window = window
                     await window.focus_window()
+                    await self.ref_page()
                     await plogging.info(f"Валидация [validate-002]: Фокус установлен для проверки окна {window.name}.")
                     await asyncio.sleep(3)
                     result = await self.check_rain_joined()
