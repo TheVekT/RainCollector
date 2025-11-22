@@ -1,0 +1,174 @@
+{
+  "raid_duration_s": 180,
+  "alpha": 0.6,
+  "bin_size": 30,
+  "global_median": 380.0,
+  "by_bin": {
+    "0-29": {
+      "morning": 237.0,
+      "day": 366.0,
+      "evening": 495.0,
+      "night": 366.5,
+      "median_all": 342.0
+    },
+    "1020-1049": {
+      "evening": 983.0,
+      "median_all": 983.0
+    },
+    "1050-1079": {
+      "evening": 1056.0,
+      "median_all": 1056.0
+    },
+    "120-149": {
+      "morning": 365.0,
+      "day": 608.0,
+      "evening": 718.0,
+      "night": 514.0,
+      "median_all": 590.0
+    },
+    "150-179": {
+      "morning": 372.0,
+      "day": 560.0,
+      "evening": 756.0,
+      "night": 522.0,
+      "median_all": 735.0
+    },
+    "1590-1619": {
+      "night": 425.0,
+      "median_all": 425.0
+    },
+    "1680-1709": {
+      "morning": 375.0,
+      "median_all": 375.0
+    },
+    "180-209": {
+      "morning": 233.0,
+      "day": 703.0,
+      "evening": 595.0,
+      "night": 491.0,
+      "median_all": 595.0
+    },
+    "1920-1949": {
+      "day": 998.0,
+      "median_all": 998.0
+    },
+    "210-239": {
+      "morning": 440.0,
+      "day": 624.0,
+      "evening": 847.5,
+      "median_all": 730.5
+    },
+    "240-269": {
+      "morning": 448.0,
+      "day": 651.0,
+      "evening": 803.5,
+      "night": 620.0,
+      "median_all": 698.0
+    },
+    "2550-2579": {
+      "morning": 493.0,
+      "median_all": 493.0
+    },
+    "270-299": {
+      "day": 738.0,
+      "evening": 844.5,
+      "night": 631.0,
+      "median_all": 738.0
+    },
+    "30-59": {
+      "morning": 272.0,
+      "day": 445.0,
+      "evening": 481.5,
+      "night": 462.0,
+      "median_all": 403.0
+    },
+    "300-329": {
+      "evening": 793.0,
+      "median_all": 793.0
+    },
+    "330-359": {
+      "morning": 502.0,
+      "day": 688.0,
+      "evening": 809.0,
+      "night": 713.0,
+      "median_all": 713.0
+    },
+    "360-389": {
+      "evening": 788.0,
+      "night": 620.5,
+      "median_all": 774.0
+    },
+    "420-449": {
+      "night": 566.0,
+      "median_all": 566.0
+    },
+    "450-479": {
+      "day": 562.0,
+      "evening": 859.0,
+      "night": 756.5,
+      "median_all": 770.0
+    },
+    "510-539": {
+      "morning": 482.0,
+      "day": 604.5,
+      "night": 724.5,
+      "median_all": 636.0
+    },
+    "570-599": {
+      "day": 709.0,
+      "evening": 639.5,
+      "night": 648.0,
+      "median_all": 659.0
+    },
+    "60-89": {
+      "morning": 293.0,
+      "day": 525.0,
+      "evening": 558.5,
+      "night": 466.0,
+      "median_all": 489.0
+    },
+    "600-629": {
+      "night": 823.0,
+      "median_all": 823.0
+    },
+    "630-659": {
+      "night": 838.0,
+      "median_all": 838.0
+    },
+    "660-689": {
+      "day": 808.0,
+      "evening": 918.5,
+      "median_all": 873.0
+    },
+    "690-719": {
+      "day": 782.0,
+      "evening": 920.0,
+      "night": 578.0,
+      "median_all": 782.0
+    },
+    "720-749": {
+      "night": 387.0,
+      "median_all": 387.0
+    },
+    "750-779": {
+      "day": 725.0,
+      "night": 720.0,
+      "median_all": 722.5
+    },
+    "780-809": {
+      "evening": 892.0,
+      "median_all": 892.0
+    },
+    "90-119": {
+      "morning": 241.0,
+      "day": 402.5,
+      "evening": 588.0,
+      "night": 449.5,
+      "median_all": 468.0
+    },
+    "900-929": {
+      "night": 776.0,
+      "median_all": 776.0
+    }
+  }
+}

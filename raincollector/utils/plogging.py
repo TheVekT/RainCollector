@@ -1,3 +1,4 @@
+import asyncio
 import os
 import gzip
 import datetime
@@ -228,17 +229,17 @@ class Plogging:
             print(f"Error in plogging: {e}")
             self.recursion_guard = False
 
-    async def info(self, text):
-        await self._log("info", text)
+    def info(self, text):
+        asyncio.create_task(self._log("info", text))
 
-    async def error(self, text):
-        await self._log("error", text)
+    def error(self, text):
+        asyncio.create_task(self._log("error", text))
 
-    async def debug(self, text):
-        await self._log("debug", text)
+    def debug(self, text):
+        asyncio.create_task(self._log("debug", text))
 
-    async def warn(self, text):
-        await self._log("warn", text)
+    def warn(self, text):
+        asyncio.create_task(self._log("warn", text))
 
     def get_history(self):
         return list(self.log_history) if self.log_history is not None else "Log history clear."
