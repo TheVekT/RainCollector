@@ -188,7 +188,7 @@ class RainController:
         rand = random.randrange(1, 100, 1) / 100.0
         if rand > get_chance(self.current_rain_scrap):
             self.plogging.info(f"[RainController] Шанс сбора рейна не прошел (рандом {rand:.2f} > шанс {get_chance(self.current_rain_scrap):.2f}). Пропускаем сбор.")
-            #return
+            return
         await self.behavior_controller.stop()
         stat_param = load_stats('stats/stats.json')
         prediction_time = predict_remaining_from_stats(stat_param, 

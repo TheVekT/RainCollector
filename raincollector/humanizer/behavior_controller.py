@@ -3,6 +3,8 @@ import random
 from typing import Dict, List, Optional
 from raincollector.models.account import AccountWindow
 from raincollector.utils.plogging import Plogging
+from raincollector.humanizer.humanized_move import human_moveTo, Speed
+import pyautogui
 
 
 class BehaviorController:
@@ -38,6 +40,7 @@ class BehaviorController:
         self.paired_accounts = paired_accounts
         self._running = False
         self._tasks: Dict[str, asyncio.Task] = {}  # profile_name -> task
+        self._mouse_task: Optional[asyncio.Task] = None  # единственная задача для движения мыши
         self._account_tabs: Dict[str, List[Dict]] = {}  # profile_name -> список вкладок
         self._bandit_tab_ids: Dict[str, Optional[int]] = {}  # profile_name -> tab_id bandit.camp
         
@@ -51,6 +54,10 @@ class BehaviorController:
         
         self._running = True
         self.plogging.info("[BehaviorController] Запуск имитации поведения для всех аккаунтов.")
+        
+        # Запускаем единственную задачу для движения мыши
+        self._mouse_task = asyncio.create_task(self._mouse_movement_loop())
+        self.plogging.info("[BehaviorController] Запущена задача движения мыши.")
         
         # Запускаем отдельную задачу для каждого аккаунта
         for account in self.paired_accounts:
@@ -100,7 +107,15 @@ class BehaviorController:
         self.plogging.info("[BehaviorController] Остановка имитации поведения.")
         self._running = False
         
-        # Отменяем все задачи
+        # Отменяем задачу движения мыши
+        if self._mouse_task and not self._mouse_task.done():
+            self._mouse_task.cancel()
+            try:
+                await self._mouse_task
+            except asyncio.CancelledError:
+                self.plogging.debug("[BehaviorController] Задача движения мыши отменена.")
+        
+        # Отменяем все задачи аккаунтов
         for profile_name, task in self._tasks.items():
             if not task.done():
                 task.cancel()
@@ -393,6 +408,63 @@ class BehaviorController:
             return random.uniform(8, 25)   # 8-25 секунд
         else:  # fast
             return random.uniform(3, 12)   # 3-12 секунд
+    
+    async def _mouse_movement_loop(self):
+        """
+        Цикл случайного движения мыши для имитации естественного поведения.
+        Выполняется постоянно с рандомными паузами.
+        """
+        self.plogging.info("[BehaviorController:Mouse] Начало цикла движения мыши.")
+        
+        try:
+            while self._running:
+                try:
+                    # Получаем размеры экрана
+                    screen_w, screen_h = pyautogui.size()
+                    
+                    # Генерируем случайную целевую позицию (избегаем краев экрана)
+                    target_x = random.randint(int(screen_w * 0.1), int(screen_w * 0.9))
+                    target_y = random.randint(int(screen_h * 0.1), int(screen_h * 0.9))
+                    
+                    # Выбираем случайную скорость движения
+                    speed = random.choice([Speed.SLOW, Speed.MEDIUM, Speed.FAST])
+                    
+                    # Выбираем случайный jitter
+                    jitter_x = random.randint(0, 15)
+                    jitter_y = random.randint(0, 15)
+                    
+                    self.plogging.debug(
+                        f"[BehaviorController:Mouse] Движение к ({target_x}, {target_y}), "
+                        f"speed={speed.value}, jitter=({jitter_x}, {jitter_y})"
+                    )
+                    
+                    # Выполняем движение в отдельном потоке, чтобы не блокировать asyncio
+                    await asyncio.to_thread(
+                        human_moveTo,
+                        target_x,
+                        target_y,
+                        speed=speed,
+                        jitter_range=(jitter_x, jitter_y),
+                        debug=False
+                    )
+                    
+                    # Случайная пауза между движениями (10-60 секунд)
+                    pause = random.uniform(10, 60)
+                    self.plogging.debug(f"[BehaviorController:Mouse] Пауза {pause:.1f} сек")
+                    await asyncio.sleep(pause)
+                    
+                except pyautogui.FailSafeException:
+                    self.plogging.warn("[BehaviorController:Mouse] FailSafe сработал, пропускаем движение.")
+                    await asyncio.sleep(5)
+                except Exception as e:
+                    self.plogging.error(f"[BehaviorController:Mouse] Ошибка при движении мыши: {e}")
+                    await asyncio.sleep(5)
+        
+        except asyncio.CancelledError:
+            self.plogging.info("[BehaviorController:Mouse] Цикл движения мыши отменен.")
+            raise
+        except Exception as e:
+            self.plogging.error(f"[BehaviorController:Mouse] Неожиданная ошибка в цикле: {e}")
     
     def is_running(self) -> bool:
         """Проверяет, запущен ли контроллер"""

@@ -31,7 +31,7 @@ def human_moveTo(
     *,
     speed: Speed = Speed.MEDIUM,
     jitter_range: Tuple[int, int] = (0, 0),
-    samples_per_sec: int = 60,  # уменьшено со 120 до 60
+    samples_per_sec: int = 250,  # увеличено до 250 для более плавных движений
     target_tolerance: float = 10.0,  # увеличено для меньших коррекций
     fitts_W: float = 12.0,
     hold_button: bool = False,  # зажать левую кнопку мыши при перемещении
