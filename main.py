@@ -9,7 +9,6 @@ from raincollector.websocket import WebSocketServer, rain_api_client
 from raincollector.models.account import AccountWindow
 from raincollector.models.window import pygetWindow
 from raincollector.models.websocket_client import Websocket_client
-from raincollector.humanizer import BehaviorController
 from raincollector.utils.vision import DetectionModel
 from raincollector.main.rain_controller import RainController
 
@@ -30,7 +29,7 @@ async def open_browsers():
         await asyncio.sleep(2)
     await asyncio.sleep(5)
 
-async def pair_window(client: Websocket_client, paired_accounts: list[AccountWindow], behavior_controller: BehaviorController):
+async def pair_window(client: Websocket_client, paired_accounts: list[AccountWindow]):
     """Асинхронная функция для подключения клиента к окну"""
     try:
         plogging.debug(f"[PAIR] Начало pair_window для {client.profile_name}")
@@ -61,11 +60,6 @@ async def pair_window(client: Websocket_client, paired_accounts: list[AccountWin
         paired_accounts.append(account_window)
         plogging.debug(f"[PAIR] Аккаунт добавлен в список. Всего: {len(paired_accounts)}")
         
-        # Добавляем аккаунт в BehaviorController
-        plogging.debug(f"[PAIR] Добавление аккаунта в BehaviorController...")
-        await behavior_controller.add_account(account_window)
-        plogging.debug(f"[PAIR] Аккаунт добавлен в BehaviorController")
-        
     except Exception as e:
         plogging.error(f"[PAIR] ❌ Ошибка при подключении клиента {client.profile_name}: {e}")
         import traceback
@@ -74,18 +68,53 @@ async def pair_window(client: Websocket_client, paired_accounts: list[AccountWin
 
 
 def _main():
-    #running async main
     asyncio.run(main())
+
+    
+async def main_with_test():
+    """Запуск основного приложения с эмуляцией тестовых сигналов рейна"""
+    # Глобально объявляем rain_api чтобы использовать в dummy
+    global rain_api
+    
+    # Функция для эмуляции сигналов рейна
+    async def emit_test_rain_signals():
+        """Эмулирует последовательность сигналов рейна (rain_start -> rain_scrap -> rain_end)"""
+        # Деlay перед первым сигналом - даем время на инициализацию
+        await asyncio.sleep(8)
+        
+        plogging.info("[TEST] 🧪 Эмулируем rain_start сигнал")
+        rain_api.rain_start.emit()
+        
+        # Даем 2 сек, потом эмулируем обновления скрапа
+        await asyncio.sleep(2)
+        
+        plogging.info("[TEST] 🧪 Эмулируем rain_scrap сигнал (scrap=20, users=100)")
+        rain_api.rain_scrap.emit(800.0, 1100)
+        
+        
+    
+    # Запускаем тестовый сценарий в фоне параллельно основному приложению
+    test_task = asyncio.create_task(emit_test_rain_signals())
+    
+    try:
+        await main()
+    finally:
+        # Отменяем тестовую задачу если основное приложение завершилось
+        if not test_task.done():
+            test_task.cancel()
+            try:
+                await test_task
+            except asyncio.CancelledError:
+                pass
+    
+
     
 
 async def main():
     plogging.info("[MAIN] 🚀 Запуск приложения...")
     
     try:
-        plogging.info("[MAIN] Открытие браузеров...")
-        await open_browsers()
-        plogging.info("[MAIN] Браузеры открыты")
-        
+        global rain_api
         plogging.info("[MAIN] Создание WebSocket сервера...")
         server = WebSocketServer(plogging)
         
@@ -101,19 +130,16 @@ async def main():
         asyncio.create_task(rain_api.connect())
         
         paired_accounts: list[AccountWindow] = []
-        plogging.info("[MAIN] Создание BehaviorController...")
-        behavior_controller = BehaviorController(plogging, paired_accounts)
-        
         plogging.info("[MAIN] Создание RainController...")
-        raincollector = RainController(plogging, yolo_model, paired_accounts, rain_api, behavior_controller)
+        raincollector = RainController(plogging, yolo_model, paired_accounts, rain_api)
 
         # Вызываем pair_window только после получения INIT сообщения с profile_name
         plogging.info("[MAIN] Установка callback on_client_init...")
-        server.on_client_init = lambda client: pair_window(client, paired_accounts, behavior_controller)
+        server.on_client_init = lambda client: pair_window(client, paired_accounts)
         
-        # Обновляем информацию о вкладках в BehaviorController
+        # Обновляем информацию о вкладках в RainController (для синхронизации при открытии/переключении)
         plogging.info("[MAIN] Установка callback on_tabs_list...")
-        server.on_tabs_list = lambda profile_name, tabs: behavior_controller.update_tabs_info(profile_name, tabs)
+        server.on_tabs_list = lambda profile_name, tabs: raincollector.update_tabs_info(profile_name, tabs)
         
         plogging.info("[MAIN] ✅ Инициализация завершена. Ожидание подключений...")
         plogging.info("[MAIN] 📡 WebSocket сервер доступен на ws://127.0.0.1:42332")

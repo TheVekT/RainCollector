@@ -1,12 +1,17 @@
 import asyncio
+import os
 import time
+from pathlib import Path
 from raincollector.utils.plogging import Plogging
 from raincollector.models.account import AccountWindow
 from raincollector.websocket import rain_api_client
 from raincollector.utils.vision import DetectionModel
 from raincollector.humanizer.humanized_move import human_moveTo, Speed
-from raincollector.humanizer import load_stats, predict_remaining_from_stats, BehaviorController
+from raincollector.humanizer import load_stats, predict_remaining_from_stats
 from datetime import datetime
+
+# URL для переключения на bandit.camp при рейне (без behavior контроллера)
+BANDIT_CAMP_URL = "https://bandit.camp/"
 
 # Словарь шансов сбора рейна в зависимости от времени суток и количества скрапа
 # Формат: "начало-конец": {минимальный_скрап: шанс_сбора}
@@ -122,29 +127,192 @@ def get_chance(scrap: float, current_time: datetime = None) -> float:
     return chance
 
 class RainController:
-    def __init__(self, logger: Plogging, yolo_model: DetectionModel, paired_accounts: list[AccountWindow], rain_api: rain_api_client, behavior_controller: BehaviorController):
+    def __init__(self, logger: Plogging, yolo_model: DetectionModel, paired_accounts: list[AccountWindow], rain_api: rain_api_client):
         self.plogging = logger
         self.yolo_model = yolo_model
         self.paired_accounts = paired_accounts
         self.rain_api = rain_api
         self.current_account: AccountWindow = None
-        self.behavior_controller = behavior_controller
         self.rain_now = False
+        self._browsers_started = False
+        self._collect_task: asyncio.Task | None = None
+        
+        # Хранилище для синхронизации получения списка вкладок
+        self._account_tabs: dict[str, list] = {}  # profile_name -> список вкладок
+        self._tabs_ready_event: dict[str, asyncio.Event] = {}  # profile_name -> Event для синхронизации
         
         # Подключаем обработчики сигналов
-        self.rain_api.rain_start.connect(lambda: asyncio.create_task(self.humanized_collect_rain()))
+        self.rain_api.rain_start.connect(lambda: self._request_collection("rain_start"))
         self.current_rain_scrap = -1
         self.current_user_count = -1
-        self.rain_api.rain_scrap.connect(self._set_current_rain_scrap)
+        self.rain_api.rain_scrap.connect(self._on_rain_scrap)
         self.rain_api.rain_end.connect(lambda scrap, user_count: asyncio.create_task(self._on_rain_end(scrap, user_count)))
-        self.async__init__()
+
+    def _request_collection(self, trigger: str):
+        if self._collect_task and not self._collect_task.done():
+            self.plogging.info(f"[RainController] Сбор уже выполняется, игнорируем триггер: {trigger}")
+            return
+        self._collect_task = asyncio.create_task(self.humanized_collect_rain(trigger=trigger))
+
+    async def _ensure_browsers_started(self) -> bool:
+        if self._browsers_started and self.paired_accounts:
+            return True
+
+        accounts_dir = Path(__file__).resolve().parents[2] / "accounts"
+        shortcuts = list(accounts_dir.glob("*.lnk"))
+
+        if not shortcuts:
+            self.plogging.error(f"[RainController] В папке аккаунтов не найдено ярлыков: {accounts_dir}")
+            return False
+
+        self.plogging.info(f"[RainController] Запускаем браузеры для сбора рейна. Ярлыков: {len(shortcuts)}")
+        for shortcut in shortcuts:
+            try:
+                os.startfile(str(shortcut))
+            except Exception as e:
+                self.plogging.error(f"[RainController] Не удалось запустить ярлык {shortcut.name}: {e}")
+            await asyncio.sleep(2)
+
+        self._browsers_started = True
+
+        expected_accounts = len(shortcuts)
+        wait_until = time.monotonic() + 60
+        while time.monotonic() < wait_until:
+            if len(self.paired_accounts) >= expected_accounts:
+                self.plogging.info(f"[RainController] Все браузеры подключены: {len(self.paired_accounts)}/{expected_accounts}")
+                return True
+            self.plogging.info(f"[RainController] Ожидание подключения браузеров: {len(self.paired_accounts)}/{expected_accounts}")
+            await asyncio.sleep(1)
+
+        if not self.paired_accounts:
+            self.plogging.error("[RainController] Браузеры не подключились к WebSocket серверу вовремя.")
+            return False
+
+        self.plogging.warn(f"[RainController] Подключились не все браузеры: {len(self.paired_accounts)}/{expected_accounts}. Продолжаем с доступными.")
+        return True
+
+    async def _shutdown_browsers(self):
+        if not self._browsers_started:
+            return
+
+        self.plogging.info("[RainController] Выключаем браузеры после цикла рейна.")
+
+        for account in list(self.paired_accounts):
+            try:
+                if account.window and account.window.window:
+                    account.window.window.close()
+            except Exception as e:
+                self.plogging.error(f"[RainController] Не удалось закрыть окно {account.extension.profile_name}: {e}")
+
+        await asyncio.sleep(1)
+        self.paired_accounts.clear()
+        self.current_account = None
+        self._browsers_started = False
+
+    async def _get_tabs(self, account: AccountWindow, timeout: float = 5.0) -> list:
+        """
+        Получает список вкладок для аккаунта с синхронизацией через Event
+        """
+        profile_name = account.extension.profile_name
         
-    def async__init__(self):    
-        asyncio.create_task(self.behavior_controller.start())
+        # Создаём Event если его ещё нет
+        if profile_name not in self._tabs_ready_event:
+            self._tabs_ready_event[profile_name] = asyncio.Event()
         
+        event = self._tabs_ready_event[profile_name]
+        event.clear()  # очищаем событие перед новым запросом
+        
+        # Отправляем запрос на получение списка вкладок
+        self.plogging.debug(f"[RainController] Запрашиваем список вкладок для {profile_name}")
+        await account.extension.get_tabs()
+        
+        # Ждём ответа (вкладки обновятся через callback)
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            tabs = self._account_tabs.get(profile_name, [])
+            self.plogging.debug(f"[RainController] Получен список вкладок для {profile_name}: {len(tabs)} шт")
+            return tabs
+        except asyncio.TimeoutError:
+            self.plogging.warn(f"[RainController] Таймаут при получении списка вкладок для {profile_name}")
+            return []
+    
+    def update_tabs_info(self, profile_name: str, tabs: list):
+        """
+        Callback для обновления информации о вкладках (вызывается из WebSocket сервера)
+        """
+        self._account_tabs[profile_name] = tabs
+        
+        # Сигнализируем что вкладки получены
+        if profile_name in self._tabs_ready_event:
+            self._tabs_ready_event[profile_name].set()
+        
+        self.plogging.debug(f"[RainController] Обновлены вкладки для {profile_name}: {len(tabs)} шт")
+    
+    async def _navigate_to_bandit_camp(self, account: AccountWindow):
+        """
+        Открывает bandit.camp и переключается на нужную вкладку
+        """
+        profile_name = account.extension.profile_name
+        try:
+            self.plogging.info(f"[RainController] {profile_name}: открываем bandit.camp")
+            
+            # Получаем текущий список вкладок
+            tabs = await self._get_tabs(account, timeout=3.0)
+            bandit_tab_id = None
+            
+            # Ищем существующую вкладку bandit.camp
+            for tab in tabs:
+                if BANDIT_CAMP_URL in tab.get('url', ''):
+                    bandit_tab_id = tab.get('id')
+                    self.plogging.info(f"[RainController] {profile_name}: найдена существующая вкладка bandit.camp (id={bandit_tab_id})")
+                    break
+            
+            if bandit_tab_id is not None:
+                # Переключаемся на существующую вкладку
+                self.plogging.info(f"[RainController] {profile_name}: переключаемся на bandit.camp (id={bandit_tab_id})")
+                await account.extension.switch_tab(bandit_tab_id)
+            else:
+                # Открываем новую вкладку
+                self.plogging.info(f"[RainController] {profile_name}: открываем новую вкладку bandit.camp")
+                await account.extension.open_tab(BANDIT_CAMP_URL)
+                await asyncio.sleep(1)
+                
+                # Получаем обновленный список вкладок и ищем нашу
+                for attempt in range(5):
+                    tabs = await self._get_tabs(account, timeout=3.0)
+                    
+                    for tab in tabs:
+                        if BANDIT_CAMP_URL in tab.get('url', ''):
+                            bandit_tab_id = tab.get('id')
+                            self.plogging.info(f"[RainController] {profile_name}: найдена новая вкладка bandit.camp (id={bandit_tab_id}) попытка {attempt+1}/5")
+                            break
+                    
+                    if bandit_tab_id is not None:
+                        self.plogging.info(f"[RainController] {profile_name}: переключаемся на новую bandit.camp (id={bandit_tab_id})")
+                        await account.extension.switch_tab(bandit_tab_id)
+                        break
+                    
+                    if attempt < 4:
+                        await asyncio.sleep(1)
+                
+                if bandit_tab_id is None:
+                    self.plogging.error(f"[RainController] {profile_name}: не удалось найти или открыть bandit.camp")
+        
+        except Exception as e:
+            self.plogging.error(f"[RainController] Ошибка при переключении на bandit.camp для {profile_name}: {e}")
+        
+
     def _set_current_rain_scrap(self, scrap: float, user_count: int):
         self.current_rain_scrap = scrap
         self.current_user_count = user_count
+
+    def _on_rain_scrap(self, scrap: float, user_count: int):
+        self._set_current_rain_scrap(scrap, user_count)
+        if not self.rain_now and scrap >= 20:
+            self.plogging.info(
+                f"[RainController] Получен fallback-триггер от rain_scrap (scrap={scrap}, users={user_count}). Запускаем сбор."
+            )
+            self._request_collection("rain_scrap_fallback")
     
     def _extract_coords_from_detections(self, detections: dict, target_name: str) -> tuple[int, int] | None:
         """
@@ -169,34 +337,39 @@ class RainController:
         center_y = y + height // 2
         return (center_x, center_y)
 
-    async def humanized_collect_rain(self):
+    async def humanized_collect_rain(self, trigger: str = "rain_start"):
         """
         Обработчик сигнала rain_start - запускает процесс сбора рейна во всех окнах
         с использованием хуманизированных движений мыши
         """
         self.rain_now = True
-        self.plogging.info("[RainController] Получен сигнал rain_start. Начинаем humanized_collect_rain.")
+        self.plogging.info(f"[RainController] Триггер сбора: {trigger}. Начинаем humanized_collect_rain.")
         import random
-        if not self.paired_accounts:
-            self.plogging.error("[RainController] Нет подключенных аккаунтов для сбора рейна.")
-            return
         await asyncio.sleep(3)
         while self.current_rain_scrap < 20:
             self.plogging.info("[RainController] Ожидание обновления информации о рейне (скрап < 20).")
             await asyncio.sleep(0.5)
         
         rand = random.randrange(1, 100, 1) / 100.0
+        # rand = 0.01  # для тестов всегда проходим шанс, убираем рандом
         if rand > get_chance(self.current_rain_scrap):
             self.plogging.info(f"[RainController] Шанс сбора рейна не прошел (рандом {rand:.2f} > шанс {get_chance(self.current_rain_scrap):.2f}). Пропускаем сбор.")
             return
-        await self.behavior_controller.stop()
+        else:
+            self.plogging.info(f"[RainController] Шанс сбора рейна прошел (рандом {rand:.2f} <= шанс {get_chance(self.current_rain_scrap):.2f}). Продолжаем сбор.")
+
+        browsers_ready = await self._ensure_browsers_started()
+        if not browsers_ready or not self.paired_accounts:
+            self.plogging.error("[RainController] Нет доступных аккаунтов после запуска браузеров.")
+            return
+
         stat_param = load_stats('stats/stats.json')
         prediction_time = predict_remaining_from_stats(stat_param, 
                                                       scrap=self.current_rain_scrap,
                                                       current_users=self.current_user_count)
         if prediction_time >= 130 and self.current_rain_scrap < 300:
             
-            sleep_time = random.randint(20, 40)
+            sleep_time = random.randint(15, 30)
             self.plogging.info(f"[RainController] Прогнозируемое время рейна {prediction_time} сек. Перед сбором ждем дополнительно {sleep_time} сек.")
             await asyncio.sleep(sleep_time)
 
@@ -208,6 +381,10 @@ class RainController:
             # Фокусируем окно аккаунта
             await account.window.focus_window()
             await asyncio.sleep(1)
+            
+            # Переключаемся на bandit.camp (где находится кнопка join_rain)
+            await self._navigate_to_bandit_camp(account)
+            await asyncio.sleep(2)
             
             # Ищем join_rain или rain_joined на странице
             target_coords = None
@@ -260,6 +437,7 @@ class RainController:
         await self._validate_rain_collection()
         
         self.plogging.info("[RainController] Процесс humanized_collect_rain завершен.")
+        await self._shutdown_browsers()
     
     async def _humanized_rain_collect(self, account: AccountWindow, target_coords: tuple[int, int]) -> bool:
         """
@@ -512,7 +690,7 @@ class RainController:
         self.rain_now = False
         self.current_rain_scrap = -1
         self.current_user_count = -1
-        await self.behavior_controller.start()
+        await self._shutdown_browsers()
         # Сбрасываем флаги rain_connected для всех аккаунтов
         for account in self.paired_accounts:
             account.rain_connected = False
