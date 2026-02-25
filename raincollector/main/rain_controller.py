@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import random
 from pathlib import Path
 from raincollector.utils.plogging import Plogging
 from raincollector.models.account import AccountWindow
@@ -336,12 +337,23 @@ class RainController:
         center_x = x + width // 2
         center_y = y + height // 2
         return (center_x, center_y)
+    
+    def random_mouse_move(self):
+        random_cords = (random.randint(0, 1910), random.randint(0, 1070))
+        human_moveTo(
+            random_cords[0], random_cords[1],
+            speed=Speed.MEDIUM,
+            jitter_range=(25, 25),
+            debug=False
+        )
 
     async def humanized_collect_rain(self, trigger: str = "rain_start"):
         """
         Обработчик сигнала rain_start - запускает процесс сбора рейна во всех окнах
         с использованием хуманизированных движений мыши
         """
+        self.random_mouse_move()
+        await asyncio.sleep(1)
         self.rain_now = True
         self.plogging.info(f"[RainController] Триггер сбора: {trigger}. Начинаем humanized_collect_rain.")
         import random
@@ -437,6 +449,8 @@ class RainController:
         await self._validate_rain_collection()
         
         self.plogging.info("[RainController] Процесс humanized_collect_rain завершен.")
+        self.random_mouse_move()
+        await asyncio.sleep(2)
         await self._shutdown_browsers()
     
     async def _humanized_rain_collect(self, account: AccountWindow, target_coords: tuple[int, int]) -> bool:
@@ -542,7 +556,7 @@ class RainController:
             if not joined:
                 self.plogging.error(f"[_humanized_rain_collect] Не удалось собрать рейн для {account.extension.profile_name} даже после повторной попытки.")
                 return False
-        
+            
         self.plogging.info(f"[_humanized_rain_collect] Рейн успешно собран для {account.extension.profile_name}.")
         account.rain_connected = True
         return True
