@@ -9,6 +9,7 @@ from raincollector.websocket import rain_api_client
 from raincollector.utils.vision import DetectionModel
 from raincollector.humanizer.humanized_move import human_moveTo, Speed
 from raincollector.humanizer import load_stats, predict_remaining_from_stats
+from raincollector.platform import get_launcher
 from datetime import datetime
 
 # URL для переключения на bandit.camp при рейне (без behavior контроллера)
@@ -160,7 +161,8 @@ class RainController:
             return True
 
         accounts_dir = Path(__file__).resolve().parents[2] / "accounts"
-        shortcuts = list(accounts_dir.glob("*.lnk"))
+        launcher = get_launcher()
+        shortcuts = list(accounts_dir.glob(launcher.get_shortcut_glob()))
 
         if not shortcuts:
             self.plogging.error(f"[RainController] В папке аккаунтов не найдено ярлыков: {accounts_dir}")
@@ -169,7 +171,7 @@ class RainController:
         self.plogging.info(f"[RainController] Запускаем браузеры для сбора рейна. Ярлыков: {len(shortcuts)}")
         for shortcut in shortcuts:
             try:
-                os.startfile(str(shortcut))
+                launcher.launch(shortcut)
             except Exception as e:
                 self.plogging.error(f"[RainController] Не удалось запустить ярлык {shortcut.name}: {e}")
             await asyncio.sleep(2)

@@ -2,7 +2,6 @@ import asyncio
 import os
 import time
 from pathlib import Path
-import pygetwindow as gw
 import pyautogui
 from raincollector.utils.plogging import Plogging
 from raincollector.websocket import WebSocketServer, rain_api_client
@@ -11,6 +10,7 @@ from raincollector.models.window import pygetWindow
 from raincollector.models.websocket_client import Websocket_client
 from raincollector.utils.vision import DetectionModel
 from raincollector.main.rain_controller import RainController
+from raincollector.platform import get_window_manager, get_launcher
 
 plogging = Plogging()
 plogging.set_websocket_settings(False, False, False, False)
@@ -23,9 +23,10 @@ yolo_model = DetectionModel("best.pt", plogging)
 async def open_browsers():
     """Открывает все ярлыки из папки accounts"""
     accounts_dir = Path(__file__).parent / "accounts"
+    launcher = get_launcher()
     
-    for shortcut in accounts_dir.glob("*.lnk"):
-        os.startfile(str(shortcut))
+    for shortcut in accounts_dir.glob(launcher.get_shortcut_glob()):
+        launcher.launch(shortcut)
         await asyncio.sleep(2)
     await asyncio.sleep(5)
 
@@ -37,7 +38,8 @@ async def pair_window(client: Websocket_client, paired_accounts: list[AccountWin
         await asyncio.sleep(1)
         
         plogging.debug(f"[PAIR] Поиск окна с заголовком: {client.profile_name}")
-        windows = gw.getWindowsWithTitle(client.profile_name)
+        wm = get_window_manager()
+        windows = wm.get_windows_by_title(client.profile_name)
         plogging.debug(f"[PAIR] Найдено окон: {len(windows)}")
         
         if not windows:

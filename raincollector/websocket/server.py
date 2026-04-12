@@ -194,7 +194,8 @@ class WebSocketServer:
             self.logger.debug(f"[WS] Сервер готов принимать подключения")
             self.logger.debug(f"[WS] Ping interval: 20s, Ping timeout: 10s")
         except OSError as e:
-            if e.errno == 10048:  # Address already in use on Windows
+            import errno
+            if e.errno == errno.EADDRINUSE:  # Кроссплатформенный: Windows=10048, Linux=98
                 self.logger.error(f"[WS] ❌ Порт {self.port} уже занят! Закройте другой экземпляр или измените порт.")
             else:
                 self.logger.error(f"[WS] ❌ Ошибка запуска сервера: {e}")

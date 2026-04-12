@@ -3,3 +3,4 @@ __pycache__/
 accounts/
 .screens/
 start.bat
+venv/
