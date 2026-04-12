@@ -1,30 +1,30 @@
 #!/bin/bash
 # =============================================================================
-# RainCollector — Linux startup script (аналог start.bat)
+# RainCollector — Linux startup script (equivalent of start.bat)
 # =============================================================================
-# Для работы требуется X11 с HDMI-заглушкой или Xvfb
-# Убедитесь что xdotool установлен: sudo apt install xdotool
+# Requires X11 with HDMI dummy plug or Xvfb
+# Make sure xdotool is installed: sudo apt install xdotool
 # =============================================================================
 
 set -e
 
 cd "$(dirname "$0")"
 
-# X11 display (для HDMI-заглушки)
+# X11 display (for HDMI dummy plug)
 export DISPLAY="${DISPLAY:-:0}"
 export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 
-# Активация виртуального окружения
+# Activate virtual environment
 if [ -d "venv" ]; then
     source venv/bin/activate
 fi
 
-echo "🚀 Запуск RainCollector..."
+echo "🚀 Starting RainCollector..."
 echo "   DISPLAY=$DISPLAY"
 echo "   Python: $(python3 --version)"
 
 python3 main.py
 
 echo ""
-echo "Нажмите Enter для выхода..."
+echo "Press Enter to exit..."
 read

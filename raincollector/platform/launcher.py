@@ -1,8 +1,8 @@
 """
-Кроссплатформенный запуск ярлыков / скриптов браузерных профилей.
+Cross-platform browser profile shortcut / script launcher.
 
-Windows: os.startfile() для .lnk
-Linux: subprocess.Popen(["bash", path]) для .sh
+Windows: os.startfile() for .lnk shortcuts
+Linux: subprocess.Popen(["bash", path]) for .sh scripts
 """
 import os
 import sys
@@ -13,25 +13,25 @@ from typing import Optional
 
 
 class Launcher(ABC):
-    """Абстрактный запускатель ярлыков."""
+    """Abstract shortcut launcher."""
 
     @abstractmethod
     def launch(self, path: Path) -> Optional[subprocess.Popen]:
-        """Запускает ярлык/скрипт как отдельный процесс. Возвращает Popen или None."""
+        """Launch a shortcut/script as a separate process. Returns Popen or None."""
         ...
 
     @abstractmethod
     def get_shortcut_glob(self) -> str:
-        """Возвращает glob-паттерн для ярлыков (например '*.lnk' или '*.sh')."""
+        """Return a glob pattern for shortcuts (e.g. '*.lnk' or '*.sh')."""
         ...
 
 
 class WindowsLauncher(Launcher):
-    """Windows: os.startfile() для .lnk ярлыков."""
+    """Windows: os.startfile() for .lnk shortcuts."""
 
     def launch(self, path: Path) -> Optional[subprocess.Popen]:
         os.startfile(str(path))  # type: ignore[attr-defined]
-        # os.startfile не возвращает процесс, возвращаем None
+        # os.startfile does not return a process handle
         return None
 
     def get_shortcut_glob(self) -> str:
@@ -39,17 +39,17 @@ class WindowsLauncher(Launcher):
 
 
 class LinuxLauncher(Launcher):
-    """Linux: bash для .sh скриптов."""
+    """Linux: bash for .sh scripts."""
 
     def launch(self, path: Path) -> Optional[subprocess.Popen]:
-        # Убедимся что скрипт исполняемый
+        # Ensure the script is executable
         if not os.access(str(path), os.X_OK):
             os.chmod(str(path), 0o755)
         return subprocess.Popen(
             ["bash", str(path)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,  # отсоединяемый процесс
+            start_new_session=True,  # detached process
         )
 
     def get_shortcut_glob(self) -> str:
@@ -57,7 +57,7 @@ class LinuxLauncher(Launcher):
 
 
 def get_launcher() -> Launcher:
-    """Возвращает лаунчер, подходящий для текущей ОС."""
+    """Return the launcher appropriate for the current OS."""
     if sys.platform == "win32":
         return WindowsLauncher()
     else:

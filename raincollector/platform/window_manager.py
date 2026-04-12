@@ -1,8 +1,8 @@
 """
-Кроссплатформенное управление окнами.
+Cross-platform window management.
 
 Windows: pygetwindow (Win32 API)
-Linux: xdotool через subprocess
+Linux: xdotool via subprocess
 """
 import sys
 import subprocess
@@ -12,7 +12,7 @@ from typing import Optional
 
 
 class PlatformWindow(ABC):
-    """Абстрактное окно — единый интерфейс для Win32Window и xdotool."""
+    """Abstract window — unified interface for Win32Window and xdotool."""
 
     @property
     @abstractmethod
@@ -37,7 +37,7 @@ class PlatformWindow(ABC):
 
 
 class WindowManager(ABC):
-    """Абстрактный менеджер окон."""
+    """Abstract window manager."""
 
     @abstractmethod
     def get_windows_by_title(self, title: str) -> list[PlatformWindow]: ...
@@ -85,7 +85,7 @@ if sys.platform == "win32":
 else:
 
     class _XdotoolPlatformWindow(PlatformWindow):
-        """Обёртка над xdotool window-id."""
+        """Wrapper around an xdotool window-id."""
 
         def __init__(self, window_id: str):
             self._wid = window_id
@@ -99,7 +99,7 @@ else:
             )
 
         def _xprop(self, prop: str) -> str:
-            """Читает свойство окна через xprop."""
+            """Read a window property via xprop."""
             result = subprocess.run(
                 ["xprop", "-id", self._wid, prop],
                 capture_output=True, text=True,
@@ -123,14 +123,14 @@ else:
         @property
         def is_minimized(self) -> bool:
             out = self._xprop("WM_STATE")
-            # WM_STATE содержит "Iconic" для свёрнутых окон
+            # WM_STATE contains "Iconic" for minimized windows
             return "Iconic" in out or "iconic" in out.lower()
 
         def activate(self) -> None:
             self._run("windowactivate", "--sync", self._wid)
 
         def restore(self) -> None:
-            # Если окно свёрнуто — активируем (xdotool сам разворачивает)
+            # If window is minimized, activate will also restore it
             self._run("windowactivate", "--sync", self._wid)
 
         def close(self) -> None:
@@ -152,7 +152,7 @@ else:
 # Factory
 # ---------------------------------------------------------------------------
 def get_window_manager() -> WindowManager:
-    """Возвращает менеджер окон, подходящий для текущей ОС."""
+    """Return the window manager appropriate for the current OS."""
     if sys.platform == "win32":
         return Win32WindowManager()
     else:

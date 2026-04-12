@@ -1,11 +1,11 @@
 """
-Тесты кроссплатформенной абстракции: pyautogui, launcher, window_manager.
+Tests for the cross-platform abstraction: pyautogui, launcher, window_manager.
 
-Запуск:
+Usage:
     python -m pytest tests/test_platform.py -v
 
-ВАЖНО: Тесты pyautogui и window_manager требуют графического окружения
-        (X11 на Linux, рабочий стол на Windows).
+NOTE: pyautogui and window_manager tests require a graphical environment
+      (X11 on Linux, desktop on Windows).
 """
 import sys
 import os
@@ -18,7 +18,7 @@ from unittest import mock
 
 import pytest
 
-# Убеждаемся, что корень проекта в sys.path
+# Ensure project root is in sys.path
 project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -40,7 +40,7 @@ from raincollector.platform.window_manager import (
 # Helpers
 # =============================================================================
 def _has_display() -> bool:
-    """Проверяет наличие графического окружения."""
+    """Check if a graphical environment is available."""
     if sys.platform == "win32":
         return True
     return bool(os.environ.get("DISPLAY"))
@@ -48,66 +48,65 @@ def _has_display() -> bool:
 
 requires_display = pytest.mark.skipif(
     not _has_display(),
-    reason="Нет графического окружения (DISPLAY не установлен)",
+    reason="No graphical environment (DISPLAY not set)",
 )
 
 
 # =============================================================================
-# 1. Тесты pyautogui (требуют экран)
+# 1. PyAutoGUI tests (require a display)
 # =============================================================================
 class TestPyAutoGUI:
-    """Тесты базовых функций pyautogui — скриншот, позиция мыши, размер экрана."""
+    """Tests for basic pyautogui functions — screenshot, mouse position, screen size."""
 
     @requires_display
     def test_screenshot(self):
-        """pyautogui.screenshot() должен вернуть изображение с ненулевыми размерами."""
+        """pyautogui.screenshot() should return an image with non-zero dimensions."""
         import pyautogui
         img = pyautogui.screenshot()
-        assert img is not None, "screenshot() вернул None"
+        assert img is not None, "screenshot() returned None"
         w, h = img.size
-        assert w > 0 and h > 0, f"Некорректные размеры скриншота: {w}x{h}"
+        assert w > 0 and h > 0, f"Invalid screenshot dimensions: {w}x{h}"
 
     @requires_display
     def test_mouse_position(self):
-        """pyautogui.position() должен вернуть кортеж (x, y) с неотрицательными координатами."""
+        """pyautogui.position() should return a (x, y) tuple with non-negative coords."""
         import pyautogui
         pos = pyautogui.position()
-        assert isinstance(pos, tuple) or hasattr(pos, 'x'), "position() вернул неожиданный тип"
+        assert isinstance(pos, tuple) or hasattr(pos, 'x'), "position() returned unexpected type"
         x, y = pos
-        assert isinstance(x, int) and isinstance(y, int), f"Координаты не int: ({type(x)}, {type(y)})"
-        assert x >= 0 and y >= 0, f"Отрицательные координаты: ({x}, {y})"
+        assert isinstance(x, int) and isinstance(y, int), f"Coords are not int: ({type(x)}, {type(y)})"
+        assert x >= 0 and y >= 0, f"Negative coords: ({x}, {y})"
 
     @requires_display
     def test_screen_size(self):
-        """pyautogui.size() должен вернуть размеры >= 800x600 (минимальное разумное разрешение)."""
+        """pyautogui.size() should return dimensions >= 800x600 (minimum reasonable resolution)."""
         import pyautogui
         w, h = pyautogui.size()
-        assert w >= 800, f"Ширина экрана слишком мала: {w}"
-        assert h >= 600, f"Высота экрана слишком мала: {h}"
+        assert w >= 800, f"Screen width too small: {w}"
+        assert h >= 600, f"Screen height too small: {h}"
 
     @requires_display
     def test_screen_size_fullhd(self):
-        """На сервере с HDMI-заглушкой разрешение должно быть 1920x1080."""
+        """On a server with an HDMI dummy plug, resolution should be 1920x1080."""
         import pyautogui
         w, h = pyautogui.size()
-        # Это информационный тест — если разрешение отличается, 
-        # нужно настроить HDMI-заглушку через xrandr
+        # Informational test — if resolution differs, configure HDMI dummy via xrandr
         if w != 1920 or h != 1080:
             pytest.skip(
-                f"Разрешение {w}x{h} отличается от Full HD. "
-                f"Настройте через xrandr --output HDMI-1 --mode 1920x1080"
+                f"Resolution {w}x{h} differs from Full HD. "
+                f"Configure via xrandr --output HDMI-1 --mode 1920x1080"
             )
         assert w == 1920 and h == 1080
 
 
 # =============================================================================
-# 2. Тесты Launcher (запуск ярлыков/скриптов)
+# 2. Launcher tests (shortcut/script launching)
 # =============================================================================
 class TestLauncher:
-    """Тесты платформенного лаунчера — запуск ярлыков как отдельных процессов."""
+    """Tests for the platform launcher — launching shortcuts as separate processes."""
 
     def test_get_launcher_returns_correct_type(self):
-        """get_launcher() должен вернуть LauncherWindows на Windows, LinuxLauncher на Linux."""
+        """get_launcher() should return WindowsLauncher on Windows, LinuxLauncher on Linux."""
         launcher = get_launcher()
         if sys.platform == "win32":
             assert isinstance(launcher, WindowsLauncher)
@@ -115,35 +114,35 @@ class TestLauncher:
             assert isinstance(launcher, LinuxLauncher)
 
     def test_shortcut_glob_windows(self):
-        """На Windows glob должен быть *.lnk"""
+        """On Windows, glob should be *.lnk"""
         launcher = WindowsLauncher()
         assert launcher.get_shortcut_glob() == "*.lnk"
 
     def test_shortcut_glob_linux(self):
-        """На Linux glob должен быть *.sh"""
+        """On Linux, glob should be *.sh"""
         launcher = LinuxLauncher()
         assert launcher.get_shortcut_glob() == "*.sh"
 
     def test_launcher_launch_real_script(self):
         """
-        Создаёт временный скрипт, запускает через Launcher,
-        проверяет что процесс стартовал и создал маркер-файл.
+        Create a temporary script, launch it via Launcher,
+        verify the process started and created a marker file.
         """
         launcher = get_launcher()
         marker = Path(tempfile.mktemp(suffix=".marker"))
 
         try:
             if sys.platform == "win32":
-                # Создаём .bat скрипт вместо .lnk (os.startfile может запустить .bat)
+                # Create a .bat script (os.startfile can launch .bat)
                 script = Path(tempfile.mktemp(suffix=".bat"))
                 script.write_text(
                     f'@echo off\necho MARKER > "{marker}"\n',
                     encoding="utf-8",
                 )
-                # На Windows используем os.startfile напрямую (не через launcher для .bat)
+                # On Windows use os.startfile directly (not launcher for .bat)
                 os.startfile(str(script))  # type: ignore[attr-defined]
             else:
-                # Создаём .sh скрипт
+                # Create a .sh script
                 script = Path(tempfile.mktemp(suffix=".sh"))
                 script.write_text(
                     f'#!/bin/bash\necho MARKER > "{marker}"\n',
@@ -151,17 +150,17 @@ class TestLauncher:
                 )
                 os.chmod(str(script), 0o755)
                 proc = launcher.launch(script)
-                assert proc is not None, "LinuxLauncher.launch() вернул None"
-                assert isinstance(proc, subprocess.Popen), "Ожидался subprocess.Popen"
+                assert proc is not None, "LinuxLauncher.launch() returned None"
+                assert isinstance(proc, subprocess.Popen), "Expected subprocess.Popen"
 
-            # Ждём максимум 5 секунд, пока маркер-файл не появится
+            # Wait up to 5 seconds for the marker file to appear
             for _ in range(50):
                 if marker.exists():
                     break
                 time.sleep(0.1)
 
             assert marker.exists(), (
-                f"Маркер-файл {marker} не создан — скрипт не запустился как отдельный процесс"
+                f"Marker file {marker} not created — script did not run as a separate process"
             )
         finally:
             # Cleanup
@@ -171,9 +170,9 @@ class TestLauncher:
                 marker.unlink()
 
     def test_linux_launcher_sets_executable(self):
-        """LinuxLauncher должен автоматически выставить chmod +x если файл не исполняемый."""
+        """LinuxLauncher should automatically chmod +x if the file is not executable."""
         if sys.platform == "win32":
-            pytest.skip("Тест только для Linux")
+            pytest.skip("Linux-only test")
 
         launcher = LinuxLauncher()
         script = Path(tempfile.mktemp(suffix=".sh"))
@@ -184,7 +183,7 @@ class TestLauncher:
                 f'#!/bin/bash\necho OK > "{marker}"\n',
                 encoding="utf-8",
             )
-            # Убираем executable бит
+            # Remove executable bit
             os.chmod(str(script), 0o644)
 
             proc = launcher.launch(script)
@@ -195,7 +194,7 @@ class TestLauncher:
                     break
                 time.sleep(0.1)
 
-            assert marker.exists(), "Скрипт не запустился — chmod +x не сработал"
+            assert marker.exists(), "Script did not run — chmod +x did not work"
         finally:
             if script.exists():
                 script.unlink()
@@ -203,31 +202,31 @@ class TestLauncher:
                 marker.unlink()
 
     def test_linux_launcher_detached_process(self):
-        """Процесс, запущенный LinuxLauncher, должен быть отсоединённым (start_new_session=True)."""
+        """Process launched by LinuxLauncher should be detached (start_new_session=True)."""
         if sys.platform == "win32":
-            pytest.skip("Тест только для Linux")
+            pytest.skip("Linux-only test")
 
         launcher = LinuxLauncher()
         script = Path(tempfile.mktemp(suffix=".sh"))
 
         try:
-            # Скрипт, который спит 30 сек (мы его убьём)
+            # Script that sleeps 30 sec (we will kill it)
             script.write_text('#!/bin/bash\nsleep 30\n', encoding="utf-8")
             os.chmod(str(script), 0o755)
 
             proc = launcher.launch(script)
             assert proc is not None
-            assert proc.pid > 0, "PID процесса <= 0"
+            assert proc.pid > 0, "Process PID <= 0"
 
-            # Процесс должен быть в другой сессии
+            # Process should be in a different session
             proc_sid = os.getsid(proc.pid)
             my_sid = os.getsid(0)
             assert proc_sid != my_sid, (
-                f"Процесс {proc.pid} в той же сессии ({proc_sid}) — "
-                f"start_new_session не работает"
+                f"Process {proc.pid} is in the same session ({proc_sid}) — "
+                f"start_new_session is not working"
             )
 
-            # Cleanup: убиваем процесс
+            # Cleanup: kill the process
             proc.terminate()
             proc.wait(timeout=5)
         finally:
@@ -236,19 +235,19 @@ class TestLauncher:
 
 
 # =============================================================================
-# 3. Тесты WindowManager (поиск окон)
+# 3. WindowManager tests (window search)
 # =============================================================================
 class TestWindowManager:
-    """Тесты менеджера окон — поиск, фокус, закрытие."""
+    """Tests for window manager — search, focus, close."""
 
     def test_get_window_manager_returns_correct_type(self):
-        """get_window_manager() должен вернуть правильный тип для ОС."""
+        """get_window_manager() should return the correct type for the OS."""
         wm = get_window_manager()
         assert isinstance(wm, WindowManager)
 
     @requires_display
     def test_search_nonexistent_window(self):
-        """Поиск несуществующего окна должен вернуть пустой список."""
+        """Searching for a non-existent window should return an empty list."""
         wm = get_window_manager()
         windows = wm.get_windows_by_title("NONEXISTENT_WINDOW_TITLE_12345_QWERTY")
         assert isinstance(windows, list)
@@ -257,20 +256,20 @@ class TestWindowManager:
     @requires_display
     def test_search_and_close_window(self):
         """
-        Создаёт тестовое окно (notepad на Windows, xterm на Linux),
-        ищет его по заголовку, проверяет что найдено, и закрывает.
+        Create a test window (notepad on Windows, xterm on Linux),
+        search for it by title, verify it's found, and close it.
         """
         wm = get_window_manager()
         unique_title = f"RainCollector_Test_{int(time.time())}"
 
         if sys.platform == "win32":
-            # Запускаем notepad с уникальным заголовком через title
+            # Launch a cmd window with a unique title
             proc = subprocess.Popen(
                 ["cmd", "/c", f"title {unique_title} && pause"],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
         else:
-            # Запускаем xterm с уникальным заголовком
+            # Launch xterm with a unique title
             proc = subprocess.Popen(
                 ["xterm", "-T", unique_title, "-e", "sleep 30"],
                 stdout=subprocess.DEVNULL,
@@ -278,25 +277,25 @@ class TestWindowManager:
             )
 
         try:
-            time.sleep(2)  # Ждём появление окна
+            time.sleep(2)  # Wait for the window to appear
 
             windows = wm.get_windows_by_title(unique_title)
             assert len(windows) > 0, (
-                f"Окно с заголовком '{unique_title}' не найдено. "
-                f"Убедитесь что xterm установлен на Linux."
+                f"Window with title '{unique_title}' not found. "
+                f"Make sure xterm is installed on Linux."
             )
 
             win = windows[0]
             assert isinstance(win, PlatformWindow)
             assert unique_title in win.title
 
-            # Закрываем через абстракцию
+            # Close via the abstraction
             win.close()
             time.sleep(1)
 
-            # Проверяем что окно закрылось
+            # Verify the window is closed
             windows_after = wm.get_windows_by_title(unique_title)
-            assert len(windows_after) == 0, "Окно не закрылось после close()"
+            assert len(windows_after) == 0, "Window did not close after close()"
         finally:
             # Cleanup
             proc.terminate()
@@ -307,14 +306,14 @@ class TestWindowManager:
 
 
 # =============================================================================
-# 4. Тесты PlatformWindow (свойства и методы)
+# 4. PlatformWindow tests (properties and methods)
 # =============================================================================
 class TestPlatformWindow:
-    """Тесты интерфейса PlatformWindow — свойства, активация."""
+    """Tests for PlatformWindow interface — properties, activation."""
 
     @requires_display
     def test_window_properties(self):
-        """Свойства PlatformWindow (title, is_active, is_minimized) должны работать."""
+        """PlatformWindow properties (title, is_active, is_minimized) should work."""
         wm = get_window_manager()
         unique_title = f"RainCollector_Props_{int(time.time())}"
 
@@ -334,17 +333,17 @@ class TestPlatformWindow:
             time.sleep(2)
             windows = wm.get_windows_by_title(unique_title)
             if not windows:
-                pytest.skip("Тестовое окно не создалось")
+                pytest.skip("Test window was not created")
 
             win = windows[0]
 
-            # title должен содержать наш заголовок
+            # title should contain our title string
             assert unique_title in win.title
 
-            # is_minimized должен быть bool
+            # is_minimized should be bool
             assert isinstance(win.is_minimized, bool)
 
-            # is_active должен быть bool
+            # is_active should be bool
             assert isinstance(win.is_active, bool)
 
             win.close()

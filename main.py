@@ -21,7 +21,7 @@ yolo_model = DetectionModel("best.pt", plogging)
 
 
 async def open_browsers():
-    """Открывает все ярлыки из папки accounts"""
+    """Opens all shortcuts from the accounts folder"""
     accounts_dir = Path(__file__).parent / "accounts"
     launcher = get_launcher()
     

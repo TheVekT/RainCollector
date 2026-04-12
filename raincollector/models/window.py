@@ -12,13 +12,13 @@ class pygetWindow:
 
     async def focus_window(self):
         """
-        Ставит фокус на окно (кроссплатформенно через PlatformWindow).
-        Использует .activate(), .restore() если необходимо.
-        Возвращает True, если фокус установлен, иначе False.
+        Focus the window (cross-platform via PlatformWindow).
+        Uses .activate(), .restore() if necessary.
+        Returns True if focus was set, False otherwise.
         """
         try:
             if not self.window:
-                self.plogging.error("Объект окна не задан (None). Не могу установить фокус.")
+                self.plogging.error("Window object is None. Cannot set focus.")
                 return False
             try:
                 if not self.window.is_active:
@@ -28,17 +28,17 @@ class pygetWindow:
                 self.window.activate()
                 await asyncio.sleep(0.1)
 
-                # Проверим: действительно ли окно теперь активно
+                # Check if the window is now active
                 if self.window.is_active:
-                    self.plogging.info("Окно успешно активировано и находится в фокусе.")
+                    self.plogging.info("Window successfully activated and focused.")
                     await asyncio.sleep(0.2)
                     return True
                 else:
-                    self.plogging.warn("Окно не получило фокус после попытки activate(). Переходим к резервному варианту.")
+                    self.plogging.warn("Window did not receive focus after activate(). Falling back.")
             except Exception as activate_error:
-                self.plogging.warn(f"Ошибка при попытке activate(): {activate_error}")
+                self.plogging.warn(f"Error during activate(): {activate_error}")
         except Exception as e:
-            self.plogging.error(f"Ошибка при установке фокуса: {e}")
+            self.plogging.error(f"Error setting focus: {e}")
         await asyncio.sleep(0.2)
         return False
     

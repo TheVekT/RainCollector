@@ -1,7 +1,7 @@
 """
-Кроссплатформенный слой абстракции.
+Cross-platform abstraction layer.
 
-Использование:
+Usage:
     from raincollector.platform import get_window_manager, get_launcher
 
     wm = get_window_manager()
