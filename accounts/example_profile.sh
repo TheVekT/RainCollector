@@ -25,8 +25,7 @@ export DISPLAY="${DISPLAY:-:0}"
 
 exec "$CHROME_BIN" \
     --user-data-dir="$PROFILE_DIR" \
-    --profile-directory="Default" \
-    --no-sandbox \
+    --profile-directory="$PROFILE_NAME" \
     --disable-dev-shm-usage \
     --disable-gpu \
     --window-size=1920,1080 \

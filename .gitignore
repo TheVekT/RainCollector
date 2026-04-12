@@ -1,6 +1,7 @@
 logs/
 __pycache__/
-accounts/
+/accounts/*
+!/accounts/example_profile.sh
 .screens/
 start.bat
 venv/
