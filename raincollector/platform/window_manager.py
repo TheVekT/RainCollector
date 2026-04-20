@@ -34,6 +34,11 @@ class PlatformWindow(ABC):
 
     @abstractmethod
     def close(self) -> None: ...
+    
+    @abstractmethod
+    def send_key(self, key: str) -> None: 
+        """Sends a keystroke directly to the window."""
+        ...
 
 
 class WindowManager(ABC):
@@ -73,6 +78,26 @@ if sys.platform == "win32":
 
         def close(self) -> None:
             self._win.close()
+            
+        def send_key(self, key: str) -> None:
+            import ctypes
+            WM_KEYDOWN = 0x0100
+            WM_KEYUP = 0x0101
+
+            vk_codes = {
+                "F5": 0x74,
+                "ENTER": 0x0D,
+                "SPACE": 0x20
+            }
+            
+            vk_code = vk_codes.get(key.upper())
+            if vk_code:
+                hwnd = self._win._hWnd
+                
+                ctypes.windll.user32.PostMessageW(hwnd, WM_KEYDOWN, vk_code, 0)
+                ctypes.windll.user32.PostMessageW(hwnd, WM_KEYUP, vk_code, 0)
+            else:
+                print(f"[Warning] Key '{key}' not mapped in _Win32PlatformWindow")
 
     class Win32WindowManager(WindowManager):
         def get_windows_by_title(self, title: str) -> list[PlatformWindow]:
@@ -105,6 +130,11 @@ else:
                 capture_output=True, text=True,
             )
             return result.stdout.strip()
+        
+        def send_key(self, key: str) -> None:
+            # Отправляет кнопку конкретно в это окно по его ID
+            self._run("windowactivate", "--sync", self._wid)
+            self._run("key", "--clearmodifiers", key)
 
         # --- interface ---
         @property

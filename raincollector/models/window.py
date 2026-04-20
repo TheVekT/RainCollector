@@ -43,5 +43,12 @@ class pygetWindow:
         return False
     
     async def refresh_page(self):
-        pyautogui.press('f5')
-        await asyncio.sleep(3)
+        """
+        Cross-platform page refresh using direct window messaging.
+        """
+        try:
+            self.plogging.debug("Refreshing page via direct key input (F5)...")
+            self.window.send_key("F5")
+            await asyncio.sleep(3)
+        except Exception as e:
+            self.plogging.error(f"Failed to refresh page: {e}")
